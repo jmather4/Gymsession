@@ -139,6 +139,36 @@ strong{font-weight:600;color:var(--bright)}
 .out{display:none}
 .out.show{display:block}
 [hidden]{display:none!important}
+.side,.flow{display:contents}
+.banner{order:-1}
+/* Desktop: two columns. The lead card and summary stay put on the left; the working list scrolls on the right. */
+@media (min-width:900px){
+  .wrap{max-width:1180px;padding:0 32px}
+  h1{font-size:22px}
+  main{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:14px;align-items:start;padding-top:16px}
+  .side,.flow{display:flex;flex-direction:column;gap:10px;min-width:0;grid-row:1}
+  .side{grid-column:1}
+  .flow{grid-column:2}
+  .side:empty{display:none}
+  .side:empty+.flow{grid-column:1/-1}
+  main:not([data-view="setup"]) .side{position:sticky;top:116px;max-height:calc(100vh - 132px);overflow-y:auto}
+  .banner{order:0}
+  .card{padding:22px 22px}
+  .card.hero{min-height:440px;padding:26px 22px}
+  .card.hero::before{width:380px;height:380px;right:-110px;top:-150px}
+  .hero h2{font-size:62px}
+  main[data-view="draft"] .card.hero{min-height:250px}
+  main[data-view="draft"] .card.hero::before{width:290px;height:290px;right:-96px;top:-130px}
+  main[data-view="draft"] .hero h2{font-size:44px}
+  .plan-row{padding:15px 0}
+  .pname{font-size:18px}
+  dialog{margin:auto;border:1px solid var(--line)}
+  #sheet-body{padding:26px 24px 28px}
+}
+@media (min-width:1240px){
+  main[data-view="draft"] .flow,main[data-view="setup"] .flow{display:grid;grid-template-columns:1fr 1fr;align-items:start}
+  .flow .span{grid-column:1/-1}
+}
 @media (max-width:380px){.grid{grid-template-columns:repeat(2,1fr)}.grid .span2{grid-column:1/-1}.mark{font-size:54px}.hero h2{font-size:40px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -416,7 +446,7 @@ function route(){var h=(location.hash||'').slice(1);return ['today','plates','hi
 function render(){
   var r=route();
   document.querySelectorAll('nav a').forEach(function(a){if(a.dataset.tab===r)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
-  $('#view').innerHTML={today:viewToday,plates:viewPlates,history:viewHistory,setup:viewSetup}[r]();
+  var v=$('#view');v.dataset.view=r==='today'&&S.meta.draft?'draft':r;v.innerHTML={today:viewToday,plates:viewPlates,history:viewHistory,setup:viewSetup}[r]();
 }
 function planList(day){
   var list=S.meta.program[day];
@@ -457,10 +487,10 @@ function viewToday(){
       '<button class="btn" type="button" data-act="copy-rows" data-id="'+esc(summary.id)+'">Copy rows for Gym log sheet</button></div>'+
       '<textarea class="plain out" id="out-rows" readonly aria-label="Rows for the Gym log sheet"></textarea><p class="small muted" id="msg-rows"></p></section>';
   }
-  out+='<section class="card hero"><div><div class="eyebrow">Next session</div><h2>'+esc(DAYS[day])+'</h2></div>'+
+  var hero='<section class="card hero"><div><div class="eyebrow">Next session</div><h2>'+esc(DAYS[day])+'</h2></div>'+
     '<div><div class="row"><button class="btn primary wide" type="button" data-act="start" data-day="'+day+'">Start session</button></div>'+
-    '<div class="row"><button class="btn quiet" type="button" data-act="start" data-day="'+other+'">Do '+esc(DAYS[other])+' instead</button></div></div></section>'+planList(day);
-  return out;
+    '<div class="row"><button class="btn quiet" type="button" data-act="start" data-day="'+other+'">Do '+esc(DAYS[other])+' instead</button></div></div></section>';
+  return '<div class="side">'+hero+'</div><div class="flow">'+out+planList(day)+'</div>';
 }
 function setRow(ei,si,s){
   return '<div class="set'+(s.done?' done':'')+'" data-e="'+ei+'" data-s="'+si+'"><span class="n">'+(si+1)+'</span>'+
@@ -476,6 +506,7 @@ function viewDraft(){
   var out='<section class="card hero"><div><div class="eyebrow">In progress</div><h2>'+esc(DAYS[d.type])+'</h2></div>'+
     '<label class="field" for="d-date">Date<input id="d-date" type="date" data-f="date" value="'+esc(d.date)+'"></label></section>'+
     '<section class="card"><div class="eyebrow">This session. Tap a lift to jump to it.</div><ol class="plan" id="overview">'+overview()+'</ol></section>';
+  var side=out;out='';
   d.entries.forEach(function(e,ei){
     out+='<section class="card" id="lift-'+ei+'"><div class="spread"><h3>'+esc(e.name)+'</h3><span class="muted small">Target '+esc(e.target)+'</span></div>'+
       (e.last?'<div class="load">Last time: '+esc(e.last)+'</div>':'')+
@@ -486,12 +517,12 @@ function viewDraft(){
       '<button class="btn quiet" type="button" data-act="guide" data-ex="'+esc(e.exId)+'" data-name="'+esc(e.name)+'">Muscles and guide</button>'+
       (e.sets.length>1?'<button class="btn quiet" type="button" data-act="del-set" data-e="'+ei+'">− Remove last set</button>':'')+'</div></section>';
   });
-  out+='<section class="card"><div class="grid"><label class="field" for="d-rpe">Effort (RPE 1–10)<input id="d-rpe" inputmode="decimal" data-f="rpe" value="'+esc(d.rpe||'')+'"></label>'+
+  out+='<section class="card span"><div class="grid"><label class="field" for="d-rpe">Effort (RPE 1–10)<input id="d-rpe" inputmode="decimal" data-f="rpe" value="'+esc(d.rpe||'')+'"></label>'+
     '<label class="field span2" for="d-notes">Notes<input id="d-notes" data-f="notes" value="'+esc(d.notes||'')+'" placeholder="Sleep, shoulder, anything worth knowing"></label></div>'+
     '<p class="note" id="d-msg" hidden></p>'+
     '<div class="row"><button class="btn primary wide" type="button" data-act="finish">Finish and save</button></div>'+
     '<div class="row"><button class="btn quiet danger" type="button" data-act="discard">'+(armed==='discard'?'Tap again to throw this session away':'Discard session')+'</button></div></section>';
-  return out;
+  return '<div class="side">'+side+'</div><div class="flow">'+out+'</div>';
 }
 function convOut(){
   if(!(convKg>0)) return '';
@@ -518,16 +549,16 @@ function viewPlates(){
       (n.above!==null?'<button class="chip" type="button" data-act="plate-set" data-kg="'+n.above+'">Use '+fmt(n.above)+' kg</button>':'')+'</div>';
   }
   var chips=m.program.back.concat(m.program.chest).filter(function(x){return x.kind==='bar'}).map(function(ex){var s=suggest(S,ex);return s.kg>0?'<button class="chip" type="button" data-act="plate-set" data-kg="'+s.kg+'">'+esc(ex.name)+' '+fmt(s.kg)+'</button>':''}).join('');
-  return '<section class="card"><div><div class="eyebrow">Plate calculator</div><h2>What goes on the bar</h2></div>'+
+  return '<div class="side"><section class="card"><div><div class="eyebrow">Plate calculator</div><h2>What goes on the bar</h2></div>'+
     '<div class="stepper"><button class="btn" type="button" data-act="plate-step" data-dir="-1" aria-label="Next lighter weight you can load">−</button>'+
     '<input id="plate-target" inputmode="decimal" aria-label="Target weight in kg" value="'+fmt(plateTarget)+'">'+
-    '<button class="btn" type="button" data-act="plate-step" data-dir="1" aria-label="Next heavier weight you can load">+</button></div>'+body+'</section>'+
+    '<button class="btn" type="button" data-act="plate-step" data-dir="1" aria-label="Next heavier weight you can load">+</button></div>'+body+'</section></div><div class="flow">'+
     '<section class="card"><div><div class="eyebrow">Converter</div><h3>Kilograms and pounds</h3></div><div class="grid two">'+
     '<label class="field" for="cv-kg">Kilograms<input id="cv-kg" inputmode="decimal" autocomplete="off" value="'+(convKg>0?fmt(convKg):'')+'"></label>'+
     '<label class="field" for="cv-lb">Pounds<input id="cv-lb" inputmode="decimal" autocomplete="off" value="'+(convKg>0?kgToLb(convKg):'')+'"></label></div>'+
     '<div id="cv-out" class="card-sub">'+convOut()+'</div></section>'+
     (chips?'<section class="card"><div class="eyebrow">Your next barbell targets</div><div class="chips">'+chips+'</div></section>':'')+
-    '<section class="card"><div class="eyebrow">Your limit</div><p>Heaviest bar you can load: <strong>'+fmt(max)+' kg</strong>. The − and + buttons step through every weight your plates can make.</p></section>';
+    '<section class="card"><div class="eyebrow">Your limit</div><p>Heaviest bar you can load: <strong>'+fmt(max)+' kg</strong>. The − and + buttons step through every weight your plates can make.</p></section></div>';
 }
 function viewHistory(){
   var goals=S.meta.program.back.concat(S.meta.program.chest).filter(function(x){return x.goal>0}).map(function(ex){
@@ -546,9 +577,9 @@ function viewHistory(){
       '<div class="muted small">'+(s.sent?'In your sheet':'Not in your sheet yet')+'</div>'+
       '<div class="row">'+(!s.sent&&sheetCfg().url?'<button class="btn quiet" type="button" data-act="send" data-id="'+esc(s.id)+'">Send to sheet</button>':'')+'<button class="btn quiet danger" type="button" data-act="del-session" data-id="'+esc(s.id)+'">'+(armed==='del-'+s.id?'Tap again to delete for good':'Delete session')+'</button></div></div></details>';
   }).join('');
-  return (goals?'<section class="card"><div><div class="eyebrow">Goals</div><h2>Heaviest logged set</h2></div>'+goals+'</section>':'')+
+  return '<div class="side">'+(goals?'<section class="card"><div><div class="eyebrow">Goals</div><h2>Heaviest logged set</h2></div>'+goals+'</section>':'')+'</div><div class="flow">'+
     '<section class="card"><div><div class="eyebrow">Log</div><h2>'+list.length+' session'+(list.length===1?'':'s')+'</h2></div>'+
-    (sheetMsg?'<p class="note">'+esc(sheetMsg)+'</p>':'')+(rows||'<p class="muted">Nothing logged yet. Finish a session on the Today tab and it appears here.</p>')+'</section>';
+    (sheetMsg?'<p class="note">'+esc(sheetMsg)+'</p>':'')+(rows||'<p class="muted">Nothing logged yet. Finish a session on the Today tab and it appears here.</p>')+'</section></div>';
 }
 function exEditor(day,ex,i,len){
   var p='x-'+day+'-'+i+'-', f=function(key,label,val,mode,cls){return '<label class="field '+(cls||'')+'" for="'+p+key+'">'+label+'<input id="'+p+key+'" data-day="'+day+'" data-i="'+i+'" data-p="'+key+'" '+(mode?'inputmode="'+mode+'"':'')+' autocomplete="off" value="'+esc(val)+'"></label>'};
@@ -569,6 +600,7 @@ function viewSetup(){
     out+='<section class="card"><div><div class="eyebrow">Programme</div><h2>'+esc(DAYS[day])+'</h2></div>'+list.map(function(ex,i){return exEditor(day,ex,i,list.length)}).join('')+
       '<div class="row"><button class="btn" type="button" data-act="ex-add" data-day="'+day+'">+ Add exercise</button></div></section>';
   });
+  var rest=out;out='';
   out+='<section class="card"><div><div class="eyebrow">Kit</div><h2>Bar and plates</h2></div><div class="grid">'+
     '<label class="field" for="k-bar">Bar kg<input id="k-bar" inputmode="decimal" data-k="bar" value="'+fmt(S.meta.bar)+'"></label>'+
     S.meta.plates.map(function(p,i){return '<label class="field" for="k-p'+i+'">'+fmt(p.kg)+' kg plates<input id="k-p'+i+'" inputmode="numeric" data-k="plate" data-i="'+i+'" value="'+p.n+'"></label>'}).join('')+
@@ -585,7 +617,7 @@ function viewSetup(){
     '<textarea class="plain out" id="out-setup" readonly aria-label="Copied text"></textarea><p class="small muted" id="msg-setup"></p>'+
     '<label class="field" for="restore">Restore from a backup: paste it here<textarea id="restore" placeholder="Paste a backup you copied earlier"></textarea></label>'+
     '<div class="row"><button class="btn danger" type="button" data-act="restore">'+(armed==='restore'?'Tap again to replace everything with this backup':'Restore backup')+'</button></div><p class="small muted" id="msg-restore"></p></section>';
-  return out;
+  return '<div class="flow">'+rest+'</div><div class="side">'+out+'</div>';
 }
 
 /* ---- actions ---- */
