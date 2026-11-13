@@ -256,47 +256,74 @@ function defaults(){
 }
 function r2(n){return Math.round(n*100)/100}
 function fmt(n){return String(r2(n))}
-/* What is being loaded: the barbell, one dumbbell, or a matched pair. div is how many ends share each plate size. */
+/* What is being loaded. A barbell mirrors its plates on both sides (mult 2). A dumbbell can be loaded unevenly, so its plates
+   are counted whole (mult 1) and then split across the two ends as evenly as possible. div is how many copies of the load the
+   plate stock must cover: 2 for the bar's sides, 1 for one dumbbell, 2 for a matched pair. */
 function rig(meta,mode){
   var hd=meta.dbHandle>0?meta.dbHandle:1.5;
-  return mode==='db1'?{base:hd,div:2,word:'handle',side:'per end'}:mode==='db2'?{base:hd,div:4,word:'handle',side:'per end'}:{base:meta.bar,div:2,word:'bar',side:'per side'};
+  return mode==='db1'?{base:hd,div:1,mult:1,even:false,word:'handle'}:mode==='db2'?{base:hd,div:2,mult:1,even:false,word:'handle'}:{base:meta.bar,div:2,mult:2,even:true,word:'bar'};
 }
-/* Every weight one end can carry, with the fewest plates that make it. Keys are kg x 100. */
-function sideCombos(plates,div){
-  div=div||2;
+/* Split plates over two ends so the ends differ as little as possible (exact, by subset sums in 0.25 kg steps). */
+function splitEnds(list){
+  var q=list.map(function(kg){return Math.round(kg*4)}),total=q.reduce(function(a,b){return a+b},0),reach=[[]];
+  for(var i=0;i<q.length;i++){for(var sum=total;sum>=q[i];sum--){if(!reach[sum]&&reach[sum-q[i]])reach[sum]=reach[sum-q[i]].concat(i)}}
+  var best=0;for(var t=0;t<=Math.floor(total/2);t++)if(reach[t])best=t;
+  var pick={};reach[best].forEach(function(ix){pick[ix]=1});
+  var a=[],b=[];list.forEach(function(kg,ix){(pick[ix]?a:b).push(kg)});
+  var desc=function(x,y){return y-x};a.sort(desc);b.sort(desc);
+  return [b,a];
+}
+function endsGap(ends){var s=function(l){return l.reduce(function(x,y){return x+y},0)};return r2(Math.abs(s(ends[0])-s(ends[1])))}
+/* Every plate load the stock allows, keeping for each total the best list: for a bar the fewest plates; for a dumbbell few plates and nearly even ends, where each 0.25 kg of imbalance counts as one extra plate. Loads whose ends would differ by more than 2.5 kg are left out. Keys are kg x 100. */
+function sideCombos(plates,div,even){
   var inv=plates.map(function(p){return [p.kg,Math.floor(p.n/div)]}).filter(function(p){return p[0]>0&&p[1]>0}).sort(function(a,b){return b[0]-a[0]});
-  var m=new Map([[0,[]]]);
-  inv.forEach(function(p){
-    var next=new Map(m);
-    m.forEach(function(list,sum){
-      for(var k=1;k<=p[1];k++){
-        var s=sum+Math.round(p[0]*100)*k, l=list.concat(Array(k).fill(p[0]));
-        if(!next.has(s)||next.get(s).length>l.length) next.set(s,l);
-      }
-    });
-    m=next;
-  });
+  var MAXGAP=2.5,score=function(l){if(even)return l.length;var gap=endsGap(splitEnds(l));return gap>MAXGAP?Infinity:l.length+gap*4};
+  var m=new Map(),list=[];
+  var walk=function(i,sum){
+    if(i===inv.length){var sc=score(list),old=m.get(sum);if(sc!==Infinity&&(!old||sc<score(old)))m.set(sum,list.slice());return}
+    var k;
+    for(k=0;k<=inv[i][1];k++){walk(i+1,sum+Math.round(inv[i][0]*100)*k);list.push(inv[i][0])}
+    for(k=0;k<=inv[i][1];k++)list.pop();
+  };
+  walk(0,0);
   return m;
 }
+var comboCache={};
+function combosFor(meta,mode){
+  var g=rig(meta,mode),key=mode+'|'+JSON.stringify(meta.plates);
+  if(!comboCache[key])comboCache[key]=sideCombos(meta.plates,g.div,g.even);
+  return comboCache[key];
+}
 function totals(meta,mode){
-  var g=rig(meta,mode),out=[];sideCombos(meta.plates,g.div).forEach(function(list,side){out.push(r2(g.base+side*2/100))});
+  var g=rig(meta,mode),out=[];combosFor(meta,mode).forEach(function(list,sum){out.push(r2(g.base+sum*g.mult/100))});
   return out.sort(function(a,b){return a-b});
 }
+/* side is per side for a bar and the whole plate load for a dumbbell; ends are the two ends' plates, heaviest first. */
 function loading(meta,total,mode){
-  var g=rig(meta,mode),side=Math.round((total-g.base)*50), list=sideCombos(meta.plates,g.div).get(side);
-  return list?{side:side/100,plates:list}:null;
+  var g=rig(meta,mode),key=Math.round((total-g.base)*100/g.mult),list=combosFor(meta,mode).get(key);
+  if(!list) return null;
+  return {side:key/100,plates:list.slice(),ends:g.even?[list.slice(),list.slice()]:splitEnds(list)};
+}
+function manualLoad(meta,mode,list){
+  var g=rig(meta,mode),sum=r2(list.reduce(function(a,b){return a+b},0)),sorted=list.slice().sort(function(a,b){return b-a});
+  return {side:sum,plates:sorted,ends:g.even?[sorted.slice(),sorted.slice()]:splitEnds(list),total:r2(g.base+sum*g.mult)};
 }
 function nearest(meta,total,mode){
   var t=totals(meta,mode),below=null,above=null;
   t.forEach(function(v){if(v<=total+1e-9)below=v; if(above===null&&v>=total-1e-9)above=v});
   return {below:below,above:above,max:t[t.length-1],exact:below!==null&&Math.abs(below-total)<1e-9};
 }
+function endText(l){return l.length?l.map(fmt).join(' + '):'nothing'}
 function loadText(meta,total,mode){
   var g=rig(meta,mode);
   if(!(total>0)) return '';
   if(total<g.base) return 'Lighter than the '+fmt(g.base)+' kg '+g.word;
   var l=loading(meta,total,mode);
-  if(l) return l.plates.length?fmt(g.base)+' '+g.word+' + '+fmt(l.side)+' '+g.side+' ('+l.plates.map(fmt).join(' + ')+')':'Empty '+fmt(g.base)+' kg '+g.word;
+  if(l){
+    if(!l.plates.length) return 'Empty '+fmt(g.base)+' kg '+g.word;
+    if(g.even) return fmt(g.base)+' bar + '+fmt(l.side)+' per side ('+l.plates.map(fmt).join(' + ')+')';
+    return fmt(g.base)+' handle + '+fmt(l.side)+' of plates. One end: '+endText(l.ends[0])+'. Other end: '+endText(l.ends[1])+(endsGap(l.ends)>0?'. Ends differ by '+fmt(endsGap(l.ends))+' kg':'');
+  }
   var n=nearest(meta,total,mode);
   if(n.above===null) return 'More than your plates allow. Heaviest you can load: '+fmt(n.max)+' kg';
   return 'Your plates can\'t make '+fmt(total)+'. Nearest: '+fmt(n.below)+' or '+fmt(n.above)+' kg';
@@ -773,22 +800,26 @@ function viewPlates(){
   var m=S.meta,mode=plateMode,isBar=mode==='bar',g=rig(m,mode),t=totals(m,mode),max=t[t.length-1];
   var lifts=m.program.back.concat(m.program.chest).filter(function(x){return x.kind===(isBar?'bar':'db')});
   if(plateTarget===null){var first=lifts.map(function(x){return suggest(S,x).kg}).filter(function(k){return k>0})[0];plateTarget=first||g.base}
-  if(manual){plateTarget=r2(g.base+2*manual.reduce(function(a,b){return a+b},0))}
+  if(manual){plateTarget=manualLoad(m,mode,manual).total}
   if(convKg===null)convKg=plateTarget;
-  var l=manual?{side:r2(manual.reduce(function(a,b){return a+b},0)),plates:manual.slice().sort(function(a,b){return b-a})}:loading(m,plateTarget,mode),n=nearest(m,plateTarget,mode),body;
+  var l=manual?manualLoad(m,mode,manual):loading(m,plateTarget,mode),n=nearest(m,plateTarget,mode),body;
   var used=function(kg){return l?l.plates.filter(function(x){return x===kg}).length:0};
-  var picker='<div><div class="eyebrow">Tap a plate to add it to '+(isBar?'both sides':mode==='db2'?'both ends of both dumbbells':'both ends')+'. Tap a plate on the '+g.word+' to take it off.</div><div class="pick">'+
+  var picker='<div><div class="eyebrow">Tap a plate to add it'+(isBar?' to both sides':mode==='db2'?' to both dumbbells. It goes on the lighter end':'. It goes on the lighter end')+'. Tap a plate on the '+g.word+' to take it off.</div><div class="pick">'+
     m.plates.filter(function(p){return p.kg>0&&Math.floor(p.n/g.div)>0}).slice().sort(function(a,b){return b.kg-a.kg}).map(function(p){
       var left=Math.floor(p.n/g.div)-used(p.kg),sz=Math.round(26+p.kg*2.6);
-      return '<button class="pp" type="button" data-act="plate-add" data-kg="'+p.kg+'"'+(left>0?'':' disabled')+' aria-label="Add '+fmt(p.kg)+' kg plates, '+left+' pair'+(left===1?'':'s')+' left">'+
+      return '<button class="pp" type="button" data-act="plate-add" data-kg="'+p.kg+'"'+(left>0?'':' disabled')+' aria-label="Add '+fmt(p.kg)+' kg, '+left+' left">'+
         '<span class="disc" style="width:'+sz+'px;height:'+sz+'px"></span><span class="pk">'+fmt(p.kg)+'</span><span class="pl">'+left+' left</span></button>';
     }).join('')+'</div>'+(l&&l.plates.length?'<div class="row"><button class="btn quiet" type="button" data-act="plate-clear">Take all plates off</button></div>':'')+'</div>';
   if(l){
     var plate=function(kg){var hgt=Math.round(30+kg*5.4),w=kg>=10?14:kg>=5?12:9;return '<button type="button" class="plate" data-act="plate-remove" data-kg="'+kg+'" style="height:'+hgt+'px;width:'+w+'px" title="Take off '+fmt(kg)+' kg" aria-label="Take off '+fmt(kg)+' kg plates"></button>'};
-    var right=l.plates.map(plate).join(''),left=l.plates.slice().reverse().map(plate).join(''),cap=isBar?'<span class="end"></span>':'<span class="collar"></span>';
-    body='<div class="barbell'+(isBar?'':' db')+'" role="img" aria-label="'+(isBar?'Bar':'Dumbbell')+' loaded with '+esc(l.plates.map(fmt).join(', ')||'no plates')+' on each '+(isBar?'side':'end')+'">'+cap+left+'<span class="shaft"></span>'+right+cap+'</div>'+
-      '<div><div class="eyebrow">'+(isBar?'Each side':mode==='db2'?'Each end, same on both dumbbells':'Each end')+'</div><div class="target">'+(l.plates.length?esc(l.plates.map(fmt).join(' + '))+' = '+fmt(l.side)+' kg':'No plates')+'</div></div>'+
-      '<p class="muted small">'+fmt(g.base)+' kg '+g.word+' + 2 \u00d7 '+fmt(l.side)+' kg = '+fmt(plateTarget)+' kg'+(mode==='db2'?' each':'')+'</p>'+picker;
+    var right=l.ends[1].map(plate).join(''),left=l.ends[0].slice().reverse().map(plate).join(''),cap=isBar?'<span class="end"></span>':'<span class="collar"></span>';
+    var sum=function(x){return r2(x.reduce(function(a,b){return a+b},0))},gap=endsGap(l.ends);
+    body='<div class="barbell'+(isBar?'':' db')+'" role="img" aria-label="'+(isBar?'Bar':'Dumbbell')+' loaded: one end '+esc(endText(l.ends[0]))+', other end '+esc(endText(l.ends[1]))+'">'+cap+left+'<span class="shaft"></span>'+right+cap+'</div>'+
+      (isBar?'<div><div class="eyebrow">Each side</div><div class="target">'+(l.plates.length?esc(l.plates.map(fmt).join(' + '))+' = '+fmt(l.side)+' kg':'No plates')+'</div></div>'+
+        '<p class="muted small">'+fmt(g.base)+' kg bar + 2 \u00d7 '+fmt(l.side)+' kg = '+fmt(plateTarget)+' kg</p>'
+      :'<div class="grid two"><div><div class="eyebrow">One end</div><div class="target">'+esc(endText(l.ends[0]))+(l.ends[0].length>1?' = '+fmt(sum(l.ends[0])):'')+'</div></div>'+
+        '<div><div class="eyebrow">Other end</div><div class="target">'+esc(endText(l.ends[1]))+(l.ends[1].length>1?' = '+fmt(sum(l.ends[1])):'')+'</div></div></div>'+
+        '<p class="muted small">'+fmt(g.base)+' kg handle + '+fmt(l.side)+' kg of plates = '+fmt(plateTarget)+' kg'+(mode==='db2'?' each, both dumbbells loaded the same':'')+'.'+(gap>0?' Ends differ by '+fmt(gap)+' kg.':' Ends balanced.')+'</p>')+picker;
   }else{
     body='<p class="note">'+esc(loadText(m,plateTarget,mode))+'</p><div class="chips">'+
       (n.below!==null?'<button class="chip" type="button" data-act="plate-set" data-kg="'+n.below+'">Use '+fmt(n.below)+' kg</button>':'')+
@@ -806,8 +837,8 @@ function viewPlates(){
     '<label class="field" for="cv-lb">Pounds<input id="cv-lb" inputmode="decimal" autocomplete="off" value="'+(convKg>0?kgToLb(convKg):'')+'"></label></div>'+
     '<div id="cv-out" class="card-sub">'+convOut()+'</div></section>'+
     (chips?'<section class="card"><div class="eyebrow">Your next '+(isBar?'barbell':'dumbbell')+' targets</div><div class="chips">'+chips+'</div></section>':'')+
-    '<section class="card"><div class="eyebrow">Your limit</div><p>'+(isBar?'Heaviest bar you can load':mode==='db2'?'Heaviest matched pair your plates make':'Heaviest single dumbbell your plates make')+': <strong>'+fmt(max)+' kg</strong>'+(mode==='db2'?' each':'')+'. The \u2212 and + buttons step through every weight your plates can make.</p>'+
-    (isBar?'':'<p class="small muted">'+(mode==='db2'?'A pair needs four of a plate size, so sizes you own fewer than four of are left out. ':'')+'This goes by plate count only. Check the plates physically fit on the handle.</p>')+'</section></div>';
+    '<section class="card"><div class="eyebrow">Your limit</div><p>'+(isBar?'Heaviest bar you can load':mode==='db2'?'Heaviest pair your plates make':'Heaviest single dumbbell your plates make')+': <strong>'+fmt(max)+' kg</strong>'+(mode==='db2'?' each':'')+'. The \u2212 and + buttons step through every weight your plates can make.</p>'+
+    (isBar?'':'<p class="small muted">Dumbbell ends can carry different plates. The calculator keeps the two ends within 2.5 kg of each other'+(mode==='db2'?', using half your plates for each dumbbell':'')+'. It goes by plate count only, so check the plates fit on the handle.</p>')+'</section></div>';
 }
 function viewHistory(){
   var goals=S.meta.program.back.concat(S.meta.program.chest).filter(function(x){return x.goal>0}).map(function(ex){
