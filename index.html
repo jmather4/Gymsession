@@ -141,6 +141,9 @@ strong{font-weight:600;color:var(--bright)}
 [hidden]{display:none!important}
 .hero-actions{display:flex;flex-direction:column;gap:10px}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);background:rgba(11,9,10,.55)}
+.seg3{grid-template-columns:repeat(3,1fr)}
+.barbell.db .shaft{flex-basis:44px}
+.barbell .collar{height:16px;flex:0 0 6px;background:linear-gradient(180deg,#f5ecef,#8a717c 55%,#3b2f34)}
 .seg button{border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:0 6px;min-height:46px;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
 .fig{display:block;width:100%;height:auto;max-height:460px}
@@ -220,7 +223,7 @@ var DAYS={back:'Back & Biceps',chest:'Chest & Triceps'};
 var KINDS={bar:'Barbell',db:'Dumbbell',bw:'Bodyweight'};
 function defaults(){
   var x=function(id,name,kind,sets,min,max,kg,step,goal){return {id:id,name:name,kind:kind,sets:sets,min:min,max:max,kg:kg,step:step,goal:goal||0}};
-  return {v:1,sessions:[],meta:{updatedAt:0,bar:8,deleted:[],draft:null,
+  return {v:1,sessions:[],meta:{updatedAt:0,bar:8,dbHandle:1.5,deleted:[],draft:null,
     plates:[{kg:10,n:6},{kg:7.5,n:2},{kg:2.5,n:2},{kg:2,n:2},{kg:1.25,n:4},{kg:1,n:4}],
     program:{
       back:[
@@ -243,9 +246,15 @@ function defaults(){
 }
 function r2(n){return Math.round(n*100)/100}
 function fmt(n){return String(r2(n))}
-/* Every weight one side of the bar can carry, with the fewest plates that make it. Keys are kg x 100. */
-function sideCombos(plates){
-  var inv=plates.map(function(p){return [p.kg,Math.floor(p.n/2)]}).filter(function(p){return p[0]>0&&p[1]>0}).sort(function(a,b){return b[0]-a[0]});
+/* What is being loaded: the barbell, one dumbbell, or a matched pair. div is how many ends share each plate size. */
+function rig(meta,mode){
+  var hd=meta.dbHandle>0?meta.dbHandle:1.5;
+  return mode==='db1'?{base:hd,div:2,word:'handle',side:'per end'}:mode==='db2'?{base:hd,div:4,word:'handle',side:'per end'}:{base:meta.bar,div:2,word:'bar',side:'per side'};
+}
+/* Every weight one end can carry, with the fewest plates that make it. Keys are kg x 100. */
+function sideCombos(plates,div){
+  div=div||2;
+  var inv=plates.map(function(p){return [p.kg,Math.floor(p.n/div)]}).filter(function(p){return p[0]>0&&p[1]>0}).sort(function(a,b){return b[0]-a[0]});
   var m=new Map([[0,[]]]);
   inv.forEach(function(p){
     var next=new Map(m);
@@ -259,26 +268,27 @@ function sideCombos(plates){
   });
   return m;
 }
-function totals(meta){
-  var out=[];sideCombos(meta.plates).forEach(function(list,side){out.push(r2(meta.bar+side*2/100))});
+function totals(meta,mode){
+  var g=rig(meta,mode),out=[];sideCombos(meta.plates,g.div).forEach(function(list,side){out.push(r2(g.base+side*2/100))});
   return out.sort(function(a,b){return a-b});
 }
-function loading(meta,total){
-  var side=Math.round((total-meta.bar)*50), list=sideCombos(meta.plates).get(side);
+function loading(meta,total,mode){
+  var g=rig(meta,mode),side=Math.round((total-g.base)*50), list=sideCombos(meta.plates,g.div).get(side);
   return list?{side:side/100,plates:list}:null;
 }
-function nearest(meta,total){
-  var t=totals(meta),below=null,above=null;
+function nearest(meta,total,mode){
+  var t=totals(meta,mode),below=null,above=null;
   t.forEach(function(v){if(v<=total+1e-9)below=v; if(above===null&&v>=total-1e-9)above=v});
   return {below:below,above:above,max:t[t.length-1],exact:below!==null&&Math.abs(below-total)<1e-9};
 }
-function loadText(meta,total){
+function loadText(meta,total,mode){
+  var g=rig(meta,mode);
   if(!(total>0)) return '';
-  if(total<meta.bar) return 'Lighter than the '+fmt(meta.bar)+' kg bar';
-  var l=loading(meta,total);
-  if(l) return l.plates.length?fmt(meta.bar)+' bar + '+fmt(l.side)+' per side ('+l.plates.map(fmt).join(' + ')+')':'Empty '+fmt(meta.bar)+' kg bar';
-  var n=nearest(meta,total);
-  if(n.above===null) return 'More than your plates allow. Heaviest bar: '+fmt(n.max)+' kg';
+  if(total<g.base) return 'Lighter than the '+fmt(g.base)+' kg '+g.word;
+  var l=loading(meta,total,mode);
+  if(l) return l.plates.length?fmt(g.base)+' '+g.word+' + '+fmt(l.side)+' '+g.side+' ('+l.plates.map(fmt).join(' + ')+')':'Empty '+fmt(g.base)+' kg '+g.word;
+  var n=nearest(meta,total,mode);
+  if(n.above===null) return 'More than your plates allow. Heaviest you can load: '+fmt(n.max)+' kg';
   return 'Your plates can\'t make '+fmt(total)+'. Nearest: '+fmt(n.below)+' or '+fmt(n.above)+' kg';
 }
 function e1rm(kg,reps){return reps<=1?kg:kg*(1+reps/30)}
@@ -644,39 +654,43 @@ function viewDraft(){
 }
 function convOut(){
   if(!(convKg>0)) return '';
-  var m=S.meta,n=nearest(m,r2(convKg)),chip=function(v){return '<button class="chip" type="button" data-act="plate-set" data-kg="'+v+'">Load '+fmt(v)+' kg ('+kgToLb(v)+' lb)</button>'};
+  var m=S.meta,n=nearest(m,r2(convKg),plateMode),g=rig(m,plateMode),chip=function(v){return '<button class="chip" type="button" data-act="plate-set" data-kg="'+v+'">Load '+fmt(v)+' kg ('+kgToLb(v)+' lb)</button>'};
   if(n.exact) return '<p class="small muted">Your plates make '+fmt(n.below)+' kg exactly.</p><div class="chips">'+chip(n.below)+'</div>';
-  if(n.above===null) return '<p class="note">That is over the heaviest bar you can load: '+fmt(n.max)+' kg ('+kgToLb(n.max)+' lb).</p><div class="chips">'+chip(n.max)+'</div>';
-  if(n.below===null) return '<p class="small muted">Lighter than the empty bar, which is '+fmt(m.bar)+' kg ('+kgToLb(m.bar)+' lb).</p>';
+  if(n.above===null) return '<p class="note">That is over the heaviest you can load: '+fmt(n.max)+' kg ('+kgToLb(n.max)+' lb).</p><div class="chips">'+chip(n.max)+'</div>';
+  if(n.below===null) return '<p class="small muted">Lighter than the empty '+g.word+', which is '+fmt(g.base)+' kg ('+kgToLb(g.base)+' lb).</p>';
   return '<p class="small muted">Your plates can\'t make that exactly. Nearest you can load:</p><div class="chips">'+chip(n.below)+chip(n.above)+'</div>';
 }
+var plateMode='bar', MODES={bar:'Barbell',db1:'One dumbbell',db2:'Pair'};
 function viewPlates(){
-  var m=S.meta,t=totals(m),max=t[t.length-1];
-  if(plateTarget===null){var b=m.program.chest.concat(m.program.back).filter(function(x){return x.kind==='bar'})[0];plateTarget=b?suggest(S,b).kg||m.bar:m.bar}
+  var m=S.meta,mode=plateMode,isBar=mode==='bar',g=rig(m,mode),t=totals(m,mode),max=t[t.length-1];
+  var lifts=m.program.back.concat(m.program.chest).filter(function(x){return x.kind===(isBar?'bar':'db')});
+  if(plateTarget===null){var first=lifts.map(function(x){return suggest(S,x).kg}).filter(function(k){return k>0})[0];plateTarget=first||g.base}
   if(convKg===null)convKg=plateTarget;
-  var l=loading(m,plateTarget),n=nearest(m,plateTarget),body;
+  var l=loading(m,plateTarget,mode),n=nearest(m,plateTarget,mode),body;
   if(l){
     var plate=function(kg){var hgt=Math.round(30+kg*5.4),w=kg>=10?14:kg>=5?12:9;return '<span class="plate" style="height:'+hgt+'px;width:'+w+'px" title="'+fmt(kg)+' kg"></span>'};
-    var right=l.plates.map(plate).join(''),left=l.plates.slice().reverse().map(plate).join('');
-    body='<div class="barbell" role="img" aria-label="Bar loaded with '+esc(l.plates.map(fmt).join(', ')||'no plates')+' on each side"><span class="end"></span>'+left+'<span class="shaft"></span>'+right+'<span class="end"></span></div>'+
-      '<div><div class="eyebrow">Each side</div><div class="target">'+(l.plates.length?esc(l.plates.map(fmt).join(' + '))+' = '+fmt(l.side)+' kg':'No plates')+'</div></div>'+
-      '<p class="muted small">'+fmt(m.bar)+' kg bar + 2 × '+fmt(l.side)+' kg = '+fmt(plateTarget)+' kg</p>';
+    var right=l.plates.map(plate).join(''),left=l.plates.slice().reverse().map(plate).join(''),cap=isBar?'<span class="end"></span>':'<span class="collar"></span>';
+    body='<div class="barbell'+(isBar?'':' db')+'" role="img" aria-label="'+(isBar?'Bar':'Dumbbell')+' loaded with '+esc(l.plates.map(fmt).join(', ')||'no plates')+' on each '+(isBar?'side':'end')+'">'+cap+left+'<span class="shaft"></span>'+right+cap+'</div>'+
+      '<div><div class="eyebrow">'+(isBar?'Each side':mode==='db2'?'Each end, same on both dumbbells':'Each end')+'</div><div class="target">'+(l.plates.length?esc(l.plates.map(fmt).join(' + '))+' = '+fmt(l.side)+' kg':'No plates')+'</div></div>'+
+      '<p class="muted small">'+fmt(g.base)+' kg '+g.word+' + 2 \u00d7 '+fmt(l.side)+' kg = '+fmt(plateTarget)+' kg'+(mode==='db2'?' each':'')+'</p>';
   }else{
-    body='<p class="note">'+esc(loadText(m,plateTarget))+'</p><div class="chips">'+
+    body='<p class="note">'+esc(loadText(m,plateTarget,mode))+'</p><div class="chips">'+
       (n.below!==null?'<button class="chip" type="button" data-act="plate-set" data-kg="'+n.below+'">Use '+fmt(n.below)+' kg</button>':'')+
       (n.above!==null?'<button class="chip" type="button" data-act="plate-set" data-kg="'+n.above+'">Use '+fmt(n.above)+' kg</button>':'')+'</div>';
   }
-  var chips=m.program.back.concat(m.program.chest).filter(function(x){return x.kind==='bar'}).map(function(ex){var s=suggest(S,ex);return s.kg>0?'<button class="chip" type="button" data-act="plate-set" data-kg="'+s.kg+'">'+esc(ex.name)+' '+fmt(s.kg)+'</button>':''}).join('');
-  return '<div class="side"><section class="card"><div><div class="eyebrow">Plate calculator</div><h2>What goes on the bar</h2></div>'+
-    '<div class="stepper"><button class="btn" type="button" data-act="plate-step" data-dir="-1" aria-label="Next lighter weight you can load">−</button>'+
+  var chips=lifts.map(function(ex){var s=suggest(S,ex);return s.kg>0?'<button class="chip" type="button" data-act="plate-set" data-kg="'+s.kg+'">'+esc(ex.name)+' '+fmt(s.kg)+'</button>':''}).join('');
+  var seg='<div class="seg seg3" role="group" aria-label="What are you loading">'+Object.keys(MODES).map(function(k){return '<button type="button" data-act="plate-mode" data-mode="'+k+'" aria-pressed="'+(k===mode?'true':'false')+'">'+MODES[k]+'</button>'}).join('')+'</div>';
+  return '<div class="side"><section class="card"><div><div class="eyebrow">Plate calculator</div><h2>'+(isBar?'What goes on the bar':mode==='db2'?'What goes on each dumbbell':'What goes on the dumbbell')+'</h2></div>'+seg+
+    '<div class="stepper"><button class="btn" type="button" data-act="plate-step" data-dir="-1" aria-label="Next lighter weight you can load">\u2212</button>'+
     '<input id="plate-target" inputmode="decimal" aria-label="Target weight in kg" value="'+fmt(plateTarget)+'">'+
     '<button class="btn" type="button" data-act="plate-step" data-dir="1" aria-label="Next heavier weight you can load">+</button></div>'+body+'</section></div><div class="flow">'+
     '<section class="card"><div><div class="eyebrow">Converter</div><h3>Kilograms and pounds</h3></div><div class="grid two">'+
     '<label class="field" for="cv-kg">Kilograms<input id="cv-kg" inputmode="decimal" autocomplete="off" value="'+(convKg>0?fmt(convKg):'')+'"></label>'+
     '<label class="field" for="cv-lb">Pounds<input id="cv-lb" inputmode="decimal" autocomplete="off" value="'+(convKg>0?kgToLb(convKg):'')+'"></label></div>'+
     '<div id="cv-out" class="card-sub">'+convOut()+'</div></section>'+
-    (chips?'<section class="card"><div class="eyebrow">Your next barbell targets</div><div class="chips">'+chips+'</div></section>':'')+
-    '<section class="card"><div class="eyebrow">Your limit</div><p>Heaviest bar you can load: <strong>'+fmt(max)+' kg</strong>. The − and + buttons step through every weight your plates can make.</p></section></div>';
+    (chips?'<section class="card"><div class="eyebrow">Your next '+(isBar?'barbell':'dumbbell')+' targets</div><div class="chips">'+chips+'</div></section>':'')+
+    '<section class="card"><div class="eyebrow">Your limit</div><p>'+(isBar?'Heaviest bar you can load':mode==='db2'?'Heaviest matched pair your plates make':'Heaviest single dumbbell your plates make')+': <strong>'+fmt(max)+' kg</strong>'+(mode==='db2'?' each':'')+'. The \u2212 and + buttons step through every weight your plates can make.</p>'+
+    (isBar?'':'<p class="small muted">'+(mode==='db2'?'A pair needs four of a plate size, so sizes you own fewer than four of are left out. ':'')+'This goes by plate count only. Check the plates physically fit on the handle.</p>')+'</section></div>';
 }
 function viewHistory(){
   var goals=S.meta.program.back.concat(S.meta.program.chest).filter(function(x){return x.goal>0}).map(function(ex){
@@ -721,8 +735,9 @@ function viewSetup(){
   var rest=out;out='';
   out+='<section class="card"><div><div class="eyebrow">Kit</div><h2>Bar and plates</h2></div><div class="grid">'+
     '<label class="field" for="k-bar">Bar kg<input id="k-bar" inputmode="decimal" data-k="bar" value="'+fmt(S.meta.bar)+'"></label>'+
+    '<label class="field" for="k-handle">Dumbbell handle kg<input id="k-handle" inputmode="decimal" data-k="handle" value="'+fmt(rig(S.meta,'db1').base)+'"></label>'+
     S.meta.plates.map(function(p,i){return '<label class="field" for="k-p'+i+'">'+fmt(p.kg)+' kg plates<input id="k-p'+i+'" inputmode="numeric" data-k="plate" data-i="'+i+'" value="'+p.n+'"></label>'}).join('')+
-    '</div><p class="small muted">Count every plate you own. The calculator loads both sides evenly, so an odd plate is left out.</p></section>';
+    '</div><p class="small muted">Count every plate you own. The calculator loads both sides evenly, so an odd plate is left out. The dumbbells share these plates.</p></section>';
   var c=sheetCfg(),un=unsent().length;
   out+='<section class="card"><div><div class="eyebrow">Google Sheet</div><h2>Send sessions to your sheet</h2></div>'+
     '<label class="field" for="k-url">Apps Script web app address<input id="k-url" data-k="sheet-url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/\u2026/exec" value="'+esc(c.url)+'"></label>'+
@@ -820,8 +835,9 @@ document.addEventListener('click',function(ev){
     });
   }
   else if(a==='plate-set'){plateTarget=+b.dataset.kg;render()}
+  else if(a==='plate-mode'){plateMode=b.dataset.mode;plateTarget=null;convKg=null;render()}
   else if(a==='plate-step'){
-    var t=totals(S.meta),dir=+b.dataset.dir,next=dir>0?t.filter(function(v){return v>plateTarget+1e-9})[0]:t.filter(function(v){return v<plateTarget-1e-9}).pop();
+    var t=totals(S.meta,plateMode),dir=+b.dataset.dir,next=dir>0?t.filter(function(v){return v>plateTarget+1e-9})[0]:t.filter(function(v){return v<plateTarget-1e-9}).pop();
     if(next!==undefined){plateTarget=next;render()}
   }
   else if(a==='ex-add'){S.meta.program[day].push({id:'x'+uid(),name:'New exercise',kind:'db',sets:3,min:8,max:10,kg:0,step:2,goal:0});touch();render();var all2=document.querySelectorAll('details');}
@@ -854,6 +870,7 @@ document.addEventListener('change',function(ev){
   }
   if(t.dataset.k==='sheet-url'){sheetCfg().url=t.value.trim();sheetMsg='';touch()}
   if(t.dataset.k==='sheet-key'){sheetCfg().key=t.value.trim();touch()}
+  if(t.dataset.k==='handle'){S.meta.dbHandle=num(t.value)||1.5;plateTarget=null;convKg=null;touch()}
   if(t.dataset.k==='bar'){S.meta.bar=num(t.value)||S.meta.bar;plateTarget=null;touch()}
   if(t.dataset.k==='plate'){S.meta.plates[+t.dataset.i].n=Math.max(0,Math.round(num(t.value)));plateTarget=null;touch()}
 });
