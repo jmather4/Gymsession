@@ -165,6 +165,7 @@ strong{font-weight:600;color:var(--bright)}
 .fig .m.sel{fill:#43273a;stroke:#43273a}
 #sheet-body .fig{max-height:250px}
 .fig text{fill:var(--muted);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.std{display:block;font-style:italic;font-size:12px;letter-spacing:0;text-transform:none;color:var(--muted);margin-top:3px}
 .chip.main{background:#7a536a;border-color:#7a536a;color:#f6eef1}
 .chip.also{background:transparent;border-color:#b592a5;color:#d9bfcd}
 .chip.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
@@ -458,6 +459,36 @@ var LIBRARY=[
 ];
 function libFind(name){var n=String(name||'').trim().toLowerCase();for(var i=0;i<LIBRARY.length;i++)if(LIBRARY[i][0].toLowerCase()===n)return LIBRARY[i];return null}
 function muscleText(keys){return keys.map(function(k){return MUSCLES[k][0]}).join(', ')}
+/* Rough intermediate one-rep max for men, as a multiple of bodyweight. Dumbbell figures are per dumbbell.
+   Bench, deadlift and overhead press follow published standards; the rest are estimates in line with them. Bodyweight lifts give reps instead (r:). */
+var STANDARDS={
+  'bench press':1.25,'paused bench press':1.1,'close-grip bench press':1.1,'incline barbell press':1.0,'floor press':1.1,'deadlift':2.0,
+  'romanian deadlift':1.5,'good morning':0.8,'barbell hip thrust':1.75,'barbell glute bridge':1.5,'bent-over row':1.0,'pendlay row':1.0,
+  'barbell shrug':1.5,'barbell curl':0.6,'reverse curl':0.45,'skull crushers':0.5,'barbell pullover':0.35,'overhead press':0.75,'upright row':0.65,
+  'dumbbell bench press':0.45,'neutral-grip dumbbell press':0.45,'incline dumbbell press':0.42,'dumbbell floor press':0.42,'dumbbell fly':0.25,
+  'dumbbell pullover':0.35,'single-arm dumbbell row':0.45,'chest-supported dumbbell row':0.35,'dumbbell shrug':0.5,'rear delt flyes':0.12,
+  'thumbs-up raises':0.15,'lateral raise':0.18,'dumbbell curl':0.25,'incline dumbbell curl':0.2,'concentration curl':0.22,'hammer curl':0.27,
+  'dumbbell skull crusher':0.18,'overhead triceps extension':0.4,'triceps kickback':0.12,'dumbbell romanian deadlift':0.45,'goblet squat':0.5,
+  'bulgarian split squat':0.35,'dumbbell lunge':0.35,'seated dumbbell shoulder press':0.32,'arnold press':0.28,'dumbbell upright row':0.2,
+  'pull-up':'r:12','chin-up':'r:13','push-up':'r:40','inverted row':'r:15'
+};
+/* Intermediate guide for one lift at the target's top rep count, or null when there is no standard or no bodyweight. */
+function standardFor(ex,bw){
+  var n=String(ex.name||'').trim().toLowerCase();
+  if(n==='incline press')n=ex.kind==='bar'?'incline barbell press':'incline dumbbell press';
+  var r=STANDARDS[n];
+  if(r===undefined) return null;
+  if(typeof r==='string') return {reps:+r.slice(2)};
+  if(!(bw>0)) return {needBw:true};
+  var one=r*bw, reps=ex.max||1, work=one/(1+(reps>1?reps:0)/30), step=ex.kind==='bar'?1:0.5;
+  return {one:Math.round(one),work:Math.round(work/step)*step,reps:reps};
+}
+function stdText(ex,short){
+  var s=standardFor(ex,S.meta.bodyweight);
+  if(!s||s.needBw) return '';
+  if(s.work===undefined) return short?'Int. ~'+s.reps+' reps':'About '+s.reps+' bodyweight reps';
+  return short?'Int. ~'+fmt(s.work)+' kg':'About '+fmt(s.work)+' kg'+(ex.kind==='db'?' per dumbbell':'')+' for '+s.reps+' rep'+(s.reps===1?'':'s')+' (one-rep max about '+s.one+' kg)';
+}
 var LB_PER_KG=2.20462262;
 function kgToLb(kg){return Math.round(kg*LB_PER_KG*10)/10}
 function lbToKg(lb){return lb/LB_PER_KG}
@@ -553,8 +584,8 @@ function planList(day){
     var kg=shown>0?fmt(shown)+'<small>kg</small>':(ex.kind==='bw'?'BW':'\u2013');
     var mid=!s.last?(s.kg>0?'Start':''):(s.kg!==done&&s.kg>0?'Next '+fmt(s.kg):'');
     return '<li><button class="plan-row" type="button" data-act="guide" data-ex="'+esc(ex.id)+'"><span class="idx">('+String(i+1).padStart(2,'0')+')</span>'+
-      '<span class="pname">'+esc(ex.name)+'</span><span class="preps">'+mid+'</span><span class="pkg">'+kg+'</span></button></li>';
-  }).join('')+'</ol><div class="row"><button class="btn" type="button" data-act="add-ex" data-day="'+day+'">+ Add exercise</button></div></section>';
+      '<span class="pname">'+esc(ex.name)+(stdText(ex,true)?'<em class="std">'+esc(stdText(ex,true))+'</em>':'')+'</span><span class="preps">'+mid+'</span><span class="pkg">'+kg+'</span></button></li>';
+  }).join('')+'</ol>'+(S.meta.bodyweight>0?'<p class="small muted"><em>Int. is a rough intermediate level for your bodyweight and rep target. A ballpark, not a target.</em></p>':'<p class="small muted"><em>Add your bodyweight in Setup to see a rough intermediate weight for each lift.</em></p>')+'<div class="row"><button class="btn" type="button" data-act="add-ex" data-day="'+day+'">+ Add exercise</button></div></section>';
 }
 /* A simplified statue figure in the pose of Michelangelo's David: one arm hanging, the other hand raised to the shoulder. Front and back. */
 var FIG_HAIR='<path class="hair" d="M83,32 C79,22 82,10 90,9 C93,4 101,4 104,8 C111,5 119,12 117,22 C120,26 119,31 116,33 C113,24 107,19 100,21 C93,17 86,23 83,32Z"/>';
@@ -624,6 +655,7 @@ function openGuide(id,fallbackName){
   $('#sheet-body').innerHTML='<div><div class="eyebrow">Muscles and guide</div><h3>'+esc(ex.name)+'</h3></div>'+
     (musclesIn(g.main).length||musclesIn(g.also).length?'<div>'+figure(musclesIn(g.main),musclesIn(g.also),null)+'<p class="small muted">Dark is the main work, lighter is also worked. Tap a muscle to see where it is.</p></div>':'')+'<dl class="facts">'+
     line('Main muscles',esc(g.main)||'<span class="muted">Not set. Add them in Setup.</span>')+line('Also works',esc(g.also))+
+    (s&&stdText(ex,false)?line('Intermediate','<em>'+esc(stdText(ex,false))+'</em>'):'')+
     (s?line('Target',esc(targetText(ex,s.kg)))+(ex.kind==='bar'&&s.kg>0?line('On the bar',esc(loadText(S.meta,s.kg))):'')+(s.last?line('Last time',esc(niceDate(s.last.date))+': '+esc(setsText(s.last.sets))):'')+line('Next step',esc(s.why)):'')+
     '</dl><div class="row"><a class="btn primary wide" href="'+esc(g.video)+'" target="_blank" rel="noopener">'+(g.own?'Watch your saved video':'Find a form guide on YouTube')+'</a></div>'+
     '<div class="row"><button class="btn wide" type="button" data-act="close-sheet">Close</button></div>';
@@ -709,7 +741,9 @@ function viewDraft(){
     '<section class="card"><div class="eyebrow">This session. Tap a lift to jump to it.</div><ol class="plan" id="overview">'+overview()+'</ol></section>';
   var side=out;out='';
   d.entries.forEach(function(e,ei){
+    var pex=findEx(e.exId), st=pex?stdText(pex,false):'';
     out+='<section class="card" id="lift-'+ei+'"><div class="spread"><h3>'+esc(e.name)+'</h3><span class="muted small">Target '+esc(e.target)+'</span></div>'+
+      (st?'<div class="load"><em>Intermediate guide: '+esc(st)+'</em></div>':'')+
       (e.last?'<div class="load">Last time: '+esc(e.last)+'</div>':'')+
       (e.why?'<div class="why '+e.tone+'">'+esc(e.why)+'</div>':'')+
       '<div class="load" id="load-'+ei+'">'+esc(draftLoad(e))+'</div>'+
@@ -818,6 +852,7 @@ function viewSetup(){
   var rest=out;out='';
   out+='<section class="card"><div><div class="eyebrow">Kit</div><h2>Bar and plates</h2></div><div class="grid">'+
     '<label class="field" for="k-bar">Bar kg<input id="k-bar" inputmode="decimal" data-k="bar" value="'+fmt(S.meta.bar)+'"></label>'+
+    '<label class="field" for="k-bw">Your bodyweight kg<input id="k-bw" inputmode="decimal" data-k="bw" value="'+(S.meta.bodyweight>0?fmt(S.meta.bodyweight):'')+'"></label>'+
     '<label class="field" for="k-handle">Dumbbell handle kg<input id="k-handle" inputmode="decimal" data-k="handle" value="'+fmt(rig(S.meta,'db1').base)+'"></label>'+
     S.meta.plates.map(function(p,i){return '<label class="field" for="k-p'+i+'">'+fmt(p.kg)+' kg plates<input id="k-p'+i+'" inputmode="numeric" data-k="plate" data-i="'+i+'" value="'+p.n+'"></label>'}).join('')+
     '</div><p class="small muted">Count every plate you own. The calculator loads both sides evenly, so an odd plate is left out. The dumbbells share these plates.</p></section>';
@@ -973,6 +1008,7 @@ document.addEventListener('change',function(ev){
   }
   if(t.dataset.k==='sheet-url'){sheetCfg().url=t.value.trim();sheetMsg='';touch()}
   if(t.dataset.k==='sheet-key'){sheetCfg().key=t.value.trim();touch()}
+  if(t.dataset.k==='bw'){S.meta.bodyweight=num(t.value);touch()}
   if(t.dataset.k==='handle'){S.meta.dbHandle=num(t.value)||1.5;plateTarget=null;convKg=null;touch()}
   if(t.dataset.k==='bar'){S.meta.bar=num(t.value)||S.meta.bar;plateTarget=null;touch()}
   if(t.dataset.k==='plate'){S.meta.plates[+t.dataset.i].n=Math.max(0,Math.round(num(t.value)));plateTarget=null;touch()}
