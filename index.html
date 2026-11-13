@@ -165,6 +165,8 @@ strong{font-weight:600;color:var(--bright)}
 .fig .m.sel{fill:#43273a;stroke:#43273a}
 #sheet-body .fig{max-height:250px}
 .fig text{fill:var(--muted);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.chip.main{background:#7a536a;border-color:#7a536a;color:#f6eef1}
+.chip.also{background:transparent;border-color:#b592a5;color:#d9bfcd}
 .chip.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .side,.flow{display:contents}
 .banner{order:-1}
@@ -432,6 +434,27 @@ function musclesIn(text){
   });
   return out;
 }
+/* Common home-gym lifts for the add-exercise lookup: name, kind, main muscles, also works. No upright rows or heavy overhead pressing. */
+var LIBRARY=[
+  ['Bench press','bar','chest','frontdelts,triceps'],['Paused bench press','bar','chest','frontdelts,triceps'],['Close-grip bench press','bar','triceps','chest,frontdelts'],
+  ['Incline barbell press','bar','chest','frontdelts,triceps'],['Floor press','bar','chest,triceps','frontdelts'],['Deadlift','bar','glutes,hamstrings,lowerback','quads,lats,traps,forearms'],
+  ['Romanian deadlift','bar','hamstrings,glutes','lowerback,forearms'],['Good morning','bar','hamstrings,lowerback','glutes'],['Barbell hip thrust','bar','glutes','hamstrings'],
+  ['Barbell glute bridge','bar','glutes','hamstrings'],['Bent-over row','bar','lats,rhomboids,traps','reardelts,biceps,lowerback'],['Pendlay row','bar','lats,rhomboids,traps','reardelts,biceps,lowerback'],
+  ['Barbell shrug','bar','traps','forearms'],['Barbell curl','bar','biceps','forearms'],['Reverse curl','bar','brachialis,forearms','biceps'],
+  ['Skull crushers','bar','triceps','forearms'],['Barbell pullover','bar','lats,chest','triceps,serratus'],['Landmine press','bar','frontdelts,chest','triceps,serratus'],
+  ['Dumbbell bench press','db','chest','frontdelts,triceps'],['Neutral-grip dumbbell press','db','chest','triceps,frontdelts'],['Incline dumbbell press','db','chest','frontdelts,triceps'],
+  ['Dumbbell floor press','db','chest,triceps','frontdelts'],['Dumbbell fly','db','chest','frontdelts'],['Dumbbell pullover','db','lats,chest','triceps,serratus'],
+  ['Single-arm dumbbell row','db','lats,rhomboids','reardelts,biceps,abs'],['Chest-supported dumbbell row','db','lats,rhomboids','reardelts,biceps'],
+  ['Dumbbell shrug','db','traps','forearms'],['Rear delt flyes','db','reardelts','rhomboids,traps'],['Thumbs-up raises','db','frontdelts,sidedelts','cuff,traps'],
+  ['Dumbbell curl','db','biceps','forearms'],['Incline dumbbell curl','db','biceps','forearms'],['Concentration curl','db','biceps','forearms'],['Hammer curl','db','brachialis,forearms','biceps'],
+  ['Dumbbell skull crusher','db','triceps','forearms'],['Overhead triceps extension','db','triceps','forearms'],['Triceps kickback','db','triceps','reardelts'],
+  ['Dumbbell Romanian deadlift','db','hamstrings,glutes','lowerback,forearms'],['Goblet squat','db','quads,glutes','abs'],['Bulgarian split squat','db','quads,glutes','hamstrings'],
+  ['Dumbbell lunge','db','quads,glutes','hamstrings,calves'],['Suitcase carry','db','forearms,abs','traps'],["Farmer's carry",'db','forearms,traps','abs'],
+  ['Pull-up','bw','lats','biceps,forearms,reardelts'],['Pull-up negatives','bw','lats','biceps,forearms,traps,reardelts'],['Chin-up','bw','lats,biceps','forearms'],
+  ['Push-up','bw','chest','frontdelts,triceps,abs'],['Inverted row','bw','lats,rhomboids','biceps,reardelts'],['Plank','bw','abs','frontdelts']
+];
+function libFind(name){var n=String(name||'').trim().toLowerCase();for(var i=0;i<LIBRARY.length;i++)if(LIBRARY[i][0].toLowerCase()===n)return LIBRARY[i];return null}
+function muscleText(keys){return keys.map(function(k){return MUSCLES[k][0]}).join(', ')}
 var LB_PER_KG=2.20462262;
 function kgToLb(kg){return Math.round(kg*LB_PER_KG*10)/10}
 function lbToKg(lb){return lb/LB_PER_KG}
@@ -528,7 +551,7 @@ function planList(day){
     var mid=!s.last?(s.kg>0?'Start':''):(s.kg!==done&&s.kg>0?'Next '+fmt(s.kg):'');
     return '<li><button class="plan-row" type="button" data-act="guide" data-ex="'+esc(ex.id)+'"><span class="idx">('+String(i+1).padStart(2,'0')+')</span>'+
       '<span class="pname">'+esc(ex.name)+'</span><span class="preps">'+mid+'</span><span class="pkg">'+kg+'</span></button></li>';
-  }).join('')+'</ol></section>';
+  }).join('')+'</ol><div class="row"><button class="btn" type="button" data-act="add-ex" data-day="'+day+'">+ Add exercise</button></div></section>';
 }
 /* A simplified statue figure in the pose of Michelangelo's David: one arm hanging, the other hand raised to the shoulder. Front and back. */
 var FIG_HAIR='<path class="hair" d="M83,32 C79,22 82,10 90,9 C93,4 101,4 104,8 C111,5 119,12 117,22 C120,26 119,31 116,33 C113,24 107,19 100,21 C93,17 86,23 83,32Z"/>';
@@ -604,6 +627,45 @@ function openGuide(id,fallbackName){
   var d=$('#sheet');if(d.showModal){if(!d.open)d.showModal()}else d.setAttribute('open','');
   d.scrollTop=0;
 }
+var addForm=null;
+function openAdd(day){
+  addForm={day:day,name:'',kind:'db',kg:'',sets:3,min:8,max:10,m:{},picked:false};
+  renderAdd();var d=$('#sheet');if(d.showModal){if(!d.open)d.showModal()}else d.setAttribute('open','');d.scrollTop=0;
+  setTimeout(function(){var n=$('#af-name');if(n)n.focus()},50);
+}
+function addMain(){return Object.keys(addForm.m).filter(function(k){return addForm.m[k]===1})}
+function addAlso(){return Object.keys(addForm.m).filter(function(k){return addForm.m[k]===2})}
+function addPreview(){
+  var f=addForm,lib=libFind(f.name);
+  return figure(addMain(),addAlso(),null)+'<p class="small muted" id="af-src">'+(lib&&f.picked?'Muscles filled in from the list. Tap to change them.':'Tap a muscle below: once for main work, twice for also works, three times to clear.')+'</p>';
+}
+function renderAdd(){
+  var f=addForm,cnt=function(k){return f.m[k]===1?' main':f.m[k]===2?' also':''};
+  $('#sheet-body').innerHTML='<div><div class="eyebrow">Add exercise</div><h3>'+esc(DAYS[f.day])+'</h3></div>'+
+    '<label class="field" for="af-name">Exercise name<input id="af-name" list="af-lib" autocomplete="off" placeholder="Start typing, e.g. Dumbbell curl" value="'+esc(f.name)+'"></label>'+
+    '<datalist id="af-lib">'+LIBRARY.map(function(x){return '<option value="'+esc(x[0])+'">'}).join('')+'</datalist>'+
+    '<div class="seg seg3" role="group" aria-label="Equipment">'+Object.keys(KINDS).map(function(k){return '<button type="button" data-act="af-kind" data-kind="'+k+'" aria-pressed="'+(f.kind===k?'true':'false')+'">'+KINDS[k]+'</button>'}).join('')+'</div>'+
+    '<div class="grid"><label class="field" for="af-kg">'+(f.kind==='bw'?'Added kg (optional)':'Weight kg')+'<input id="af-kg" inputmode="decimal" autocomplete="off" value="'+esc(f.kg)+'"></label>'+
+    '<label class="field" for="af-sets">Sets<input id="af-sets" inputmode="numeric" value="'+f.sets+'"></label>'+
+    '<label class="field" for="af-reps">Reps<input id="af-reps" autocomplete="off" value="'+(f.min===f.max?f.max:f.min+'-'+f.max)+'"></label></div>'+
+    (f.kind!=='bw'&&num(f.kg)>0?'<p class="load" id="af-load">'+esc(f.kind==='bar'?loadText(S.meta,num(f.kg)):loadText(S.meta,num(f.kg),'db1'))+'</p>':'<p class="load" id="af-load"></p>')+
+    '<div id="af-fig">'+addPreview()+'</div>'+
+    '<div class="chips" id="af-chips">'+Object.keys(MUSCLES).map(function(k){return '<button class="chip'+cnt(k)+'" type="button" data-act="af-m" data-m="'+k+'">'+MUSCLES[k][0]+(f.m[k]===1?' \u00b7 main':f.m[k]===2?' \u00b7 also':'')+'</button>'}).join('')+'</div>'+
+    '<p class="note" id="af-msg" hidden></p>'+
+    '<div class="row"><button class="btn primary wide" type="button" data-act="af-save">Add to '+esc(DAYS[f.day])+(S.meta.draft&&S.meta.draft.type===f.day?' and this session':'')+'</button></div>'+
+    '<div class="row"><button class="btn wide" type="button" data-act="close-sheet">Cancel</button></div>';
+}
+function afLoad(){var f=addForm,el=$('#af-load');if(el)el.textContent=f.kind!=='bw'&&num(f.kg)>0?(f.kind==='bar'?loadText(S.meta,num(f.kg)):loadText(S.meta,num(f.kg),'db1')):''}
+function saveAdd(){
+  var f=addForm,name=f.name.trim(),msg=$('#af-msg');
+  if(!name){msg.hidden=false;msg.textContent='Give the exercise a name.';return}
+  var main=addMain(),also=addAlso(),kg=num(f.kg);
+  var ex={id:'x'+uid(),name:name,kind:f.kind,sets:f.sets,min:f.min,max:f.max,kg:kg,step:f.kind==='bar'?2:f.kind==='db'?2:0,goal:0,main:muscleText(main),also:muscleText(also)};
+  S.meta.program[f.day].push(ex);
+  var d=S.meta.draft;
+  if(d&&d.type===f.day){var s=suggest(S,ex);d.entries.push({exId:ex.id,name:ex.name,kind:ex.kind,target:targetText(ex,s.kg),why:'',tone:'',last:'',sets:s.reps.map(function(r){return {kg:s.kg,reps:r,done:false}})})}
+  touch();closeSheet();addForm=null;render();
+}
 function closeSheet(){var d=$('#sheet');if(d.close)d.close();else d.removeAttribute('open')}
 function overview(){
   var d=S.meta.draft;
@@ -652,6 +714,7 @@ function viewDraft(){
       '<button class="btn quiet" type="button" data-act="guide" data-ex="'+esc(e.exId)+'" data-name="'+esc(e.name)+'">Muscles and guide</button>'+
       (e.sets.length>1?'<button class="btn quiet" type="button" data-act="del-set" data-e="'+ei+'">− Remove last set</button>':'')+'</div></section>';
   });
+  out+='<section class="card span"><div class="row"><button class="btn" type="button" data-act="add-ex" data-day="'+d.type+'">+ Add exercise to this session</button></div></section>';
   out+='<section class="card span"><div class="grid"><label class="field" for="d-rpe">Effort (RPE 1–10)<input id="d-rpe" inputmode="decimal" data-f="rpe" value="'+esc(d.rpe||'')+'"></label>'+
     '<label class="field span2" for="d-notes">Notes<input id="d-notes" data-f="notes" value="'+esc(d.notes||'')+'" placeholder="Sleep, shoulder, anything worth knowing"></label></div>'+
     '<p class="note" id="d-msg" hidden></p>'+
@@ -809,6 +872,7 @@ document.addEventListener('click',function(ev){
   else if(a==='pick'){pickDay=day;summary=null;render()}
   else if(a==='guide'){openGuide(b.dataset.ex,b.dataset.name)}
   else if(a==='close-sheet'){closeSheet()}
+  else if(a==='muscle'&&addForm&&$('#af-name')){var k2=b.dataset.m;addForm.m[k2]=((addForm.m[k2]||0)+1)%3;if(!addForm.m[k2])delete addForm.m[k2];addForm.picked=false;var y2=$('#sheet').scrollTop;renderAdd();$('#sheet').scrollTop=y2}
   else if(a==='muscle'){selMuscle=b.dataset.m;closeSheet();if(route()==='muscles')render();else location.hash='muscles'}
   else if(a==='jump'){var el=$('#lift-'+b.dataset.e);if(el)el.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}
   else if(a==='tick'){
@@ -862,12 +926,25 @@ document.addEventListener('click',function(ev){
     var t=totals(S.meta,plateMode),dir=+b.dataset.dir,next=dir>0?t.filter(function(v){return v>plateTarget+1e-9})[0]:t.filter(function(v){return v<plateTarget-1e-9}).pop();
     if(next!==undefined){plateTarget=next;manual=null;convKg=null;render()}
   }
-  else if(a==='ex-add'){S.meta.program[day].push({id:'x'+uid(),name:'New exercise',kind:'db',sets:3,min:8,max:10,kg:0,step:2,goal:0});touch();render();var all2=document.querySelectorAll('details');}
+  else if(a==='ex-add'||a==='add-ex'){openAdd(day)}
+  else if(a==='af-kind'){addForm.kind=b.dataset.kind;renderAdd()}
+  else if(a==='af-m'){var k=b.dataset.m;addForm.m[k]=((addForm.m[k]||0)+1)%3;if(!addForm.m[k])delete addForm.m[k];addForm.picked=false;var y=$('#sheet').scrollTop;renderAdd();$('#sheet').scrollTop=y}
+  else if(a==='af-save'){saveAdd()}
   else if(a==='ex-up'||a==='ex-down'){var arr=S.meta.program[day],j=a==='ex-up'?i-1:i+1,tmp=arr[i];arr[i]=arr[j];arr[j]=tmp;touch();render()}
   else if(a==='ex-del'){if(arm('ex-'+day+'-'+i)){S.meta.program[day].splice(i,1);touch();render()}else{var dd=document.querySelectorAll('details');dd.forEach(function(el){if(el.querySelector('[data-act="ex-del"][data-day="'+day+'"][data-i="'+i+'"]'))el.open=true})}}
 });
 document.addEventListener('input',function(ev){
   var t=ev.target,d=S.meta.draft;
+  if(addForm&&t.id&&t.id.indexOf('af-')===0){
+    if(t.id==='af-name'){
+      addForm.name=t.value;var lib=libFind(t.value);
+      if(lib){addForm.kind=lib[1];addForm.m={};lib[2].split(',').forEach(function(k){addForm.m[k]=1});lib[3].split(',').forEach(function(k){if(!addForm.m[k])addForm.m[k]=2});addForm.picked=true;
+        renderAdd();var n=$('#af-name');n.focus();n.setSelectionRange(n.value.length,n.value.length)}
+    }else if(t.id==='af-kg'){addForm.kg=t.value;afLoad()}
+    else if(t.id==='af-sets'){addForm.sets=Math.max(1,Math.min(10,Math.round(num(t.value))||3))}
+    else if(t.id==='af-reps'){var r=String(t.value).split(/[-\u2013 to]+/).map(function(x){return Math.round(num(x))}).filter(function(x){return x>0});if(r.length){addForm.min=Math.min.apply(null,r);addForm.max=Math.max.apply(null,r)}}
+    return;
+  }
   if(t.id==='cv-kg'){convKg=num(t.value);$('#cv-lb').value=convKg>0?kgToLb(convKg):'';$('#cv-out').innerHTML=convOut();return}
   if(t.id==='cv-lb'){convKg=lbToKg(num(t.value));$('#cv-kg').value=convKg>0?fmt(convKg):'';$('#cv-out').innerHTML=convOut();return}
   if(d&&t.dataset.f){
@@ -898,6 +975,7 @@ document.addEventListener('change',function(ev){
 });
 $('#rest').addEventListener('click',stopRest);
 $('#sheet').addEventListener('click',function(ev){if(ev.target===this)closeSheet()});
+$('#sheet').addEventListener('close',function(){addForm=null});
 window.addEventListener('hashchange',function(){closeSheet();armed=null;sheetMsg='';render();window.scrollTo(0,0)});
 setSync('loading');render();initCloud();
 </script>
