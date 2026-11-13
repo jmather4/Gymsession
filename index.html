@@ -92,6 +92,9 @@ main{padding:12px 0 64px;display:flex;flex-direction:column;gap:10px}
 .hero .field input{background:rgba(11,9,10,.55)}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .grid .span3{grid-column:1/-1}
+.grid.two{grid-template-columns:1fr 1fr}
+.card-sub{display:flex;flex-direction:column;gap:10px}
+.card-sub:empty{display:none}
 .grid .span2{grid-column:span 2}
 .banner{background:var(--sunk);border-left:2px solid var(--accent);padding:16px;display:flex;flex-direction:column;gap:10px;color:var(--bright)}
 .note{background:var(--sunk);border-left:2px solid var(--bad);padding:10px 12px;font-size:14px;color:var(--bright)}
@@ -286,9 +289,12 @@ function sheetArrays(sessions){
   })})});
   return rows;
 }
+var LB_PER_KG=2.20462262;
+function kgToLb(kg){return Math.round(kg*LB_PER_KG*10)/10}
+function lbToKg(lb){return lb/LB_PER_KG}
 /*PURE-END*/
 
-var LS='weights-log-v1', S=load(), summary=null, sheetMsg='', plateTarget=null, armed=null, restStart=0, restTimer=null, syncState='loading', cloud=null;
+var LS='weights-log-v1', S=load(), summary=null, sheetMsg='', convKg=null, plateTarget=null, armed=null, restStart=0, restTimer=null, syncState='loading', cloud=null;
 var $=function(s){return document.querySelector(s)};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function num(v){var n=parseFloat(String(v).replace(',','.'));return isFinite(n)&&n>0?n:0}
@@ -428,9 +434,18 @@ function viewDraft(){
     '<div class="row"><button class="btn quiet danger" type="button" data-act="discard">'+(armed==='discard'?'Tap again to throw this session away':'Discard session')+'</button></div></section>';
   return out;
 }
+function convOut(){
+  if(!(convKg>0)) return '';
+  var m=S.meta,n=nearest(m,r2(convKg)),chip=function(v){return '<button class="chip" type="button" data-act="plate-set" data-kg="'+v+'">Load '+fmt(v)+' kg ('+kgToLb(v)+' lb)</button>'};
+  if(n.exact) return '<p class="small muted">Your plates make '+fmt(n.below)+' kg exactly.</p><div class="chips">'+chip(n.below)+'</div>';
+  if(n.above===null) return '<p class="note">That is over the heaviest bar you can load: '+fmt(n.max)+' kg ('+kgToLb(n.max)+' lb).</p><div class="chips">'+chip(n.max)+'</div>';
+  if(n.below===null) return '<p class="small muted">Lighter than the empty bar, which is '+fmt(m.bar)+' kg ('+kgToLb(m.bar)+' lb).</p>';
+  return '<p class="small muted">Your plates can\'t make that exactly. Nearest you can load:</p><div class="chips">'+chip(n.below)+chip(n.above)+'</div>';
+}
 function viewPlates(){
   var m=S.meta,t=totals(m),max=t[t.length-1];
   if(plateTarget===null){var b=m.program.chest.concat(m.program.back).filter(function(x){return x.kind==='bar'})[0];plateTarget=b?suggest(S,b).kg||m.bar:m.bar}
+  if(convKg===null)convKg=plateTarget;
   var l=loading(m,plateTarget),n=nearest(m,plateTarget),body;
   if(l){
     var plate=function(kg){var hgt=Math.round(30+kg*5.4),w=kg>=10?14:kg>=5?12:9;return '<span class="plate" style="height:'+hgt+'px;width:'+w+'px" title="'+fmt(kg)+' kg"></span>'};
@@ -448,6 +463,10 @@ function viewPlates(){
     '<div class="stepper"><button class="btn" type="button" data-act="plate-step" data-dir="-1" aria-label="Next lighter weight you can load">−</button>'+
     '<input id="plate-target" inputmode="decimal" aria-label="Target weight in kg" value="'+fmt(plateTarget)+'">'+
     '<button class="btn" type="button" data-act="plate-step" data-dir="1" aria-label="Next heavier weight you can load">+</button></div>'+body+'</section>'+
+    '<section class="card"><div><div class="eyebrow">Converter</div><h3>Kilograms and pounds</h3></div><div class="grid two">'+
+    '<label class="field" for="cv-kg">Kilograms<input id="cv-kg" inputmode="decimal" autocomplete="off" value="'+(convKg>0?fmt(convKg):'')+'"></label>'+
+    '<label class="field" for="cv-lb">Pounds<input id="cv-lb" inputmode="decimal" autocomplete="off" value="'+(convKg>0?kgToLb(convKg):'')+'"></label></div>'+
+    '<div id="cv-out" class="card-sub">'+convOut()+'</div></section>'+
     (chips?'<section class="card"><div class="eyebrow">Your next barbell targets</div><div class="chips">'+chips+'</div></section>':'')+
     '<section class="card"><div class="eyebrow">Your limit</div><p>Heaviest bar you can load: <strong>'+fmt(max)+' kg</strong>. The − and + buttons step through every weight your plates can make.</p></section>';
 }
@@ -595,6 +614,8 @@ document.addEventListener('click',function(ev){
 });
 document.addEventListener('input',function(ev){
   var t=ev.target,d=S.meta.draft;
+  if(t.id==='cv-kg'){convKg=num(t.value);$('#cv-lb').value=convKg>0?kgToLb(convKg):'';$('#cv-out').innerHTML=convOut();return}
+  if(t.id==='cv-lb'){convKg=lbToKg(num(t.value));$('#cv-kg').value=convKg>0?fmt(convKg):'';$('#cv-out').innerHTML=convOut();return}
   if(d&&t.dataset.f){
     var row=t.closest('.set');
     if(row){var e=d.entries[+row.dataset.e],s=e.sets[+row.dataset.s];
