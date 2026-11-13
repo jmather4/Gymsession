@@ -267,9 +267,16 @@ function sheetRows(sessions){
   })})});
   return rows.join('\n');
 }
+function sheetArrays(sessions){
+  var rows=[];
+  sessions.forEach(function(s){var first=true;s.entries.forEach(function(e){e.sets.forEach(function(x,i){
+    rows.push([s.date,DAYS[s.type]||s.type,e.name,i+1,r2(x.kg),x.reps,parseFloat(s.rpe)||'',first?(s.notes||''):'',s.id]);first=false;
+  })})});
+  return rows;
+}
 /*PURE-END*/
 
-var LS='weights-log-v1', S=load(), summary=null, plateTarget=null, armed=null, restStart=0, restTimer=null, syncState='loading', cloud=null;
+var LS='weights-log-v1', S=load(), summary=null, sheetMsg='', plateTarget=null, armed=null, restStart=0, restTimer=null, syncState='loading', cloud=null;
 var $=function(s){return document.querySelector(s)};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function num(v){var n=parseFloat(String(v).replace(',','.'));return isFinite(n)&&n>0?n:0}
@@ -279,6 +286,23 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 function clone(o){return JSON.parse(JSON.stringify(o))}
 function valid(o){return o&&o.meta&&o.meta.program&&Array.isArray(o.meta.program.back)&&Array.isArray(o.meta.program.chest)&&Array.isArray(o.sessions)&&Array.isArray(o.meta.plates)}
 function load(){try{var r=localStorage.getItem(LS);if(r){var o=JSON.parse(r);if(valid(o)){o.meta.deleted=o.meta.deleted||[];return o}}}catch(e){}return defaults()}
+function sheetCfg(){return S.meta.sheet||(S.meta.sheet={url:'',key:''})}
+function unsent(){return S.sessions.filter(function(s){return !s.sent})}
+/* Append sessions to the Google Sheet through its Apps Script address. The script skips any session it already holds, so sending twice is safe. */
+async function sendToSheet(sessions){
+  var c=sheetCfg();
+  if(!c.url) return {ok:false,error:'No sheet address saved yet. Add it in Setup.'};
+  if(!sessions.length) return {ok:true,added:0};
+  try{
+    var res=await fetch(c.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({key:c.key,rows:sheetArrays(sessions)})});
+    var out=await res.json();
+    if(!out||!out.ok) return {ok:false,error:'The sheet turned the rows down'+(out&&out.error?': '+out.error:'')+'. Check the key in Setup.'};
+    var now=Date.now(),keys={};
+    sessions.forEach(function(s){s.sent=now;s.updatedAt=now;keys[monthKey(s.date)]=1});
+    saveLocal();Object.keys(keys).forEach(pushMonth);
+    return {ok:true,added:out.added};
+  }catch(e){return {ok:false,error:'Couldn\'t reach the sheet. Check your signal and the address in Setup, then send again.'}}
+}
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
 
 /* ---- saving: this device always; your Claude account as well when the page is opened in Claude ---- */
@@ -350,7 +374,9 @@ function viewToday(){
   if(summary){
     out+='<section class="banner"><strong>Saved: '+esc(DAYS[summary.type])+', '+esc(niceDate(summary.date))+'</strong>'+
       (summary.pbs.length?'<div class="row">'+summary.pbs.map(function(p){return '<span class="pb">Best yet: '+esc(p)+'</span>'}).join('')+'</div>':'')+
-      '<div class="row"><button class="btn" type="button" data-act="copy-rows" data-id="'+esc(summary.id)+'">Copy rows for Gym log sheet</button></div>'+
+      (summary.sheet==='sending'?'<p class="small">Sending to your sheet\u2026</p>':summary.sheet==='sent'?'<p class="small">Rows added to your Gymsession sheet.</p>':summary.sheet?'<p class="note">'+esc(summary.sheet)+'</p>':'')+
+      '<div class="row">'+(summary.sheet&&summary.sheet!=='sending'&&summary.sheet!=='sent'?'<button class="btn" type="button" data-act="send" data-id="'+esc(summary.id)+'">Send to sheet again</button>':'')+
+      '<button class="btn" type="button" data-act="copy-rows" data-id="'+esc(summary.id)+'">Copy rows for Gym log sheet</button></div>'+
       '<textarea class="plain out" id="out-rows" readonly aria-label="Rows for the Gym log sheet"></textarea><p class="small muted" id="msg-rows"></p></section>';
   }
   out+='<section class="card"><div><div class="eyebrow">Next session</div><h2>'+esc(DAYS[day])+'</h2></div>'+planList(day)+
@@ -424,11 +450,12 @@ function viewHistory(){
     return '<details><summary><span>'+esc(niceDate(s.date))+'</span><span class="muted">'+esc(DAYS[s.type]||s.type)+'</span></summary><div class="body">'+
       s.entries.map(function(e){return '<div><strong>'+esc(e.name)+'</strong><br><span class="muted">'+esc(setsText(e.sets))+'</span></div>'}).join('')+
       (s.rpe?'<div class="muted">Effort: RPE '+esc(s.rpe)+'</div>':'')+(s.notes?'<div class="muted">'+esc(s.notes)+'</div>':'')+
-      '<div class="row"><button class="btn quiet danger" type="button" data-act="del-session" data-id="'+esc(s.id)+'">'+(armed==='del-'+s.id?'Tap again to delete for good':'Delete session')+'</button></div></div></details>';
+      '<div class="muted small">'+(s.sent?'In your sheet':'Not in your sheet yet')+'</div>'+
+      '<div class="row">'+(!s.sent&&sheetCfg().url?'<button class="btn quiet" type="button" data-act="send" data-id="'+esc(s.id)+'">Send to sheet</button>':'')+'<button class="btn quiet danger" type="button" data-act="del-session" data-id="'+esc(s.id)+'">'+(armed==='del-'+s.id?'Tap again to delete for good':'Delete session')+'</button></div></div></details>';
   }).join('');
   return (goals?'<section class="card"><div><div class="eyebrow">Goals</div><h2>Heaviest logged set</h2></div>'+goals+'</section>':'')+
     '<section class="card"><div><div class="eyebrow">Log</div><h2>'+list.length+' session'+(list.length===1?'':'s')+'</h2></div>'+
-    (rows||'<p class="muted">Nothing logged yet. Finish a session on the Today tab and it appears here.</p>')+'</section>';
+    (sheetMsg?'<p class="note">'+esc(sheetMsg)+'</p>':'')+(rows||'<p class="muted">Nothing logged yet. Finish a session on the Today tab and it appears here.</p>')+'</section>';
 }
 function exEditor(day,ex,i,len){
   var p='x-'+day+'-'+i+'-', f=function(key,label,val,mode,cls){return '<label class="field '+(cls||'')+'" for="'+p+key+'">'+label+'<input id="'+p+key+'" data-day="'+day+'" data-i="'+i+'" data-p="'+key+'" '+(mode?'inputmode="'+mode+'"':'')+' autocomplete="off" value="'+esc(val)+'"></label>'};
@@ -452,6 +479,13 @@ function viewSetup(){
     '<label class="field" for="k-bar">Bar kg<input id="k-bar" inputmode="decimal" data-k="bar" value="'+fmt(S.meta.bar)+'"></label>'+
     S.meta.plates.map(function(p,i){return '<label class="field" for="k-p'+i+'">'+fmt(p.kg)+' kg plates<input id="k-p'+i+'" inputmode="numeric" data-k="plate" data-i="'+i+'" value="'+p.n+'"></label>'}).join('')+
     '</div><p class="small muted">Count every plate you own. The calculator loads both sides evenly, so an odd plate is left out.</p></section>';
+  var c=sheetCfg(),un=unsent().length;
+  out+='<section class="card"><div><div class="eyebrow">Google Sheet</div><h2>Send sessions to your sheet</h2></div>'+
+    '<label class="field" for="k-url">Apps Script web app address<input id="k-url" data-k="sheet-url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/\u2026/exec" value="'+esc(c.url)+'"></label>'+
+    '<label class="field" for="k-key">Key (the phrase you put in the script)<input id="k-key" data-k="sheet-key" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(c.key)+'"></label>'+
+    '<p class="small muted">With both filled in, every finished session is added to the sheet. This works from the GitHub Pages address, not from inside Claude.</p>'+
+    '<div class="row"><button class="btn" type="button" data-act="send-unsent">Send '+un+' unsent session'+(un===1?'':'s')+'</button></div>'+
+    (sheetMsg?'<p class="note">'+esc(sheetMsg)+'</p>':'')+'</section>';
   out+='<section class="card"><div><div class="eyebrow">Your data</div><h2>Backup and export</h2></div>'+
     '<div class="row"><button class="btn" type="button" data-act="copy-all">Copy all rows for Gym log sheet</button><button class="btn" type="button" data-act="copy-backup">Copy full backup</button></div>'+
     '<textarea class="plain out" id="out-setup" readonly aria-label="Copied text"></textarea><p class="small muted" id="msg-setup"></p>'+
@@ -477,7 +511,9 @@ function finishSession(){
   var pbs=personalBests(S,session);
   S.sessions.push(session);S.meta.draft=null;stopRest();
   summary={id:session.id,type:session.type,date:session.date,pbs:pbs};
-  touch();pushMonth(monthKey(session.date));render();window.scrollTo(0,0);
+  touch();pushMonth(monthKey(session.date));
+  if(sheetCfg().url){summary.sheet='sending';sendToSheet([session]).then(function(r){if(summary&&summary.id===session.id){summary.sheet=r.ok?'sent':r.error;if(route()==='today'&&!S.meta.draft)render()}})}
+  render();window.scrollTo(0,0);
 }
 function startRest(){restStart=Date.now();clearInterval(restTimer);tickRest();restTimer=setInterval(tickRest,1000)}
 function tickRest(){var s=Math.floor((Date.now()-restStart)/1000),b=$('#rest');b.hidden=false;b.textContent='Rest '+Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
@@ -524,6 +560,15 @@ document.addEventListener('click',function(ev){
     if(arm('del-'+b.dataset.id)){var gs=S.sessions.filter(function(s){return s.id===b.dataset.id})[0];S.sessions=S.sessions.filter(function(s){return s.id!==b.dataset.id});S.meta.deleted.push(b.dataset.id);if(summary&&summary.id===b.dataset.id)summary=null;touch();if(gs)pushMonth(monthKey(gs.date));render()}
     else{var open=document.querySelectorAll('details');open.forEach(function(el){if(el.querySelector('[data-id="'+b.dataset.id+'"]'))el.open=true})}
   }
+  else if(a==='send'||a==='send-unsent'){
+    var list=a==='send'?S.sessions.filter(function(s){return s.id===b.dataset.id}):unsent();
+    b.disabled=true;b.textContent='Sending\u2026';
+    sendToSheet(list).then(function(r){
+      sheetMsg=r.ok?(r.added?r.added+' row'+(r.added===1?'':'s')+' added to your sheet.':'Nothing new to add. The sheet already has these sessions.'):r.error;
+      if(summary&&a==='send'&&summary.id===b.dataset.id)summary.sheet=r.ok?'sent':r.error;
+      render();
+    });
+  }
   else if(a==='plate-set'){plateTarget=+b.dataset.kg;render()}
   else if(a==='plate-step'){
     var t=totals(S.meta),dir=+b.dataset.dir,next=dir>0?t.filter(function(v){return v>plateTarget+1e-9})[0]:t.filter(function(v){return v<plateTarget-1e-9}).pop();
@@ -554,11 +599,13 @@ document.addEventListener('change',function(ev){
     else ex[p]=num(t.value);
     touch();var sum=t.closest('details').querySelector('summary');sum.firstChild.textContent=ex.name;sum.lastChild.textContent=targetText(ex,ex.kg);
   }
+  if(t.dataset.k==='sheet-url'){sheetCfg().url=t.value.trim();sheetMsg='';touch()}
+  if(t.dataset.k==='sheet-key'){sheetCfg().key=t.value.trim();touch()}
   if(t.dataset.k==='bar'){S.meta.bar=num(t.value)||S.meta.bar;plateTarget=null;touch()}
   if(t.dataset.k==='plate'){S.meta.plates[+t.dataset.i].n=Math.max(0,Math.round(num(t.value)));plateTarget=null;touch()}
 });
 $('#rest').addEventListener('click',stopRest);
-window.addEventListener('hashchange',function(){armed=null;render();window.scrollTo(0,0)});
+window.addEventListener('hashchange',function(){armed=null;sheetMsg='';render();window.scrollTo(0,0)});
 setSync('loading');render();initCloud();
 </script>
 </body>
