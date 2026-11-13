@@ -60,6 +60,25 @@ main{padding:12px 0 64px;display:flex;flex-direction:column;gap:10px}
 .btn.danger{color:var(--bad);border-color:currentColor}
 .btn.quiet.danger{border-color:transparent}
 .btn.wide{flex:1}
+.plan{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.plan li{border-top:1px solid var(--line)}
+.plan li:first-child{border-top:0}
+.plan-row{width:100%;display:grid;grid-template-columns:34px 1fr auto 74px;gap:10px;align-items:baseline;background:transparent;border:0;padding:13px 0;text-align:left;cursor:pointer;min-height:48px}
+.pname{font-size:16px;color:var(--bright);text-transform:uppercase;letter-spacing:-.01em;line-height:1.15}
+.flag{color:var(--accent);font-weight:700}
+.preps{font-size:11px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;white-space:nowrap}
+.pkg{text-align:right;font-weight:300;font-size:26px;line-height:.9;letter-spacing:-.05em;white-space:nowrap;color:transparent;background:var(--steel);-webkit-background-clip:text;background-clip:text}
+.pkg small{font-size:10px;font-weight:600;letter-spacing:.1em;margin-left:3px;color:var(--muted);text-transform:uppercase}
+.pkg.small-n{font-size:18px;letter-spacing:-.02em}
+.plan-row.all .pname{color:var(--muted);text-decoration:line-through}
+dialog{border:0;padding:0;background:var(--surface);color:var(--ink);width:100%;max-width:560px;max-height:88%;margin:auto auto 0;border-top:1px solid var(--accent);overflow-y:auto}
+dialog::backdrop{background:rgba(5,3,4,.78)}
+#sheet-body{padding:22px 16px 28px;display:flex;flex-direction:column;gap:16px}
+.facts{margin:0;display:flex;flex-direction:column}
+.facts div{display:grid;grid-template-columns:104px 1fr;gap:12px;padding:11px 0;border-top:1px solid var(--line)}
+.facts dt{font-size:10.5px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;padding-top:3px}
+.facts dd{margin:0;color:var(--bright);overflow-wrap:anywhere}
+a.btn{display:flex;align-items:center;justify-content:center;text-decoration:none;text-align:center}
 .tiles{list-style:none;margin:0;padding:0;display:grid;gap:0}
 .tile{background:var(--surface);border-top:1px solid var(--line);padding:16px 16px 18px;min-height:150px;display:flex;flex-direction:column;justify-content:space-between;gap:20px}
 .tile-top{display:flex;flex-direction:column;gap:6px}
@@ -143,6 +162,8 @@ strong{font-weight:600;color:var(--bright)}
   <div class="sync" id="sync" role="status"></div>
   <main id="view"></main>
 </div>
+
+<dialog id="sheet" aria-label="Muscles and guide"><div id="sheet-body"></div></dialog>
 
 <script>
 /*PURE-START*/
@@ -289,6 +310,26 @@ function sheetArrays(sessions){
   })})});
   return rows;
 }
+/* Muscles for the built-in lifts. An exercise's own Main/Also fields in Setup override these. */
+var GUIDE={
+  'deadlift':['Glutes, hamstrings, lower back','Quads, lats, upper back, grip'],
+  'bb-row':['Lats, rhomboids, mid traps','Rear delts, biceps, lower back'],
+  'pullup-neg':['Lats','Biceps, forearms, lower traps, rear delts'],
+  'db-row':['Lats, rhomboids','Rear delts, biceps, core'],
+  'pullover':['Lats, chest','Triceps (long head), serratus'],
+  'hammer':['Brachialis, brachioradialis (outer arm and forearm)','Biceps'],
+  'rear-delt':['Rear delts','Rhomboids, mid traps'],
+  'paused-bench':['Chest','Front delts, triceps'],
+  'ng-press':['Chest','Triceps, front delts'],
+  'incline':['Upper chest','Front delts, triceps'],
+  'skulls':['Triceps','Forearms'],
+  'thumbs-up':['Side and front delts','Rotator cuff, upper traps']
+};
+function guideFor(ex){
+  var g=GUIDE[ex.id]||['',''];
+  var video=/^https:\/\//.test(ex.video||'')?ex.video:'';
+  return {main:ex.main||g[0],also:ex.also||g[1],video:video||'https://www.youtube.com/results?search_query='+encodeURIComponent(ex.name+' proper form'),own:!!video};
+}
 var LB_PER_KG=2.20462262;
 function kgToLb(kg){return Math.round(kg*LB_PER_KG*10)/10}
 function lbToKg(lb){return lb/LB_PER_KG}
@@ -378,16 +419,32 @@ function render(){
   $('#view').innerHTML={today:viewToday,plates:viewPlates,history:viewHistory,setup:viewSetup}[r]();
 }
 function planList(day){
-  return '<ul class="tiles">'+S.meta.program[day].map(function(ex,i){
+  var list=S.meta.program[day];
+  return '<section class="card"><div class="eyebrow">Planned: '+list.length+' lift'+(list.length===1?'':'s')+'. Tap one for muscles, plates and a video.</div><ol class="plan">'+list.map(function(ex,i){
     var s=suggest(S,ex), reps=ex.sets+' \u00d7 '+(ex.min===ex.max?ex.max:ex.min+'\u2013'+ex.max);
-    var mark=s.kg>0?fmt(s.kg)+'<small>kg</small>':(ex.kind==='bw'?'BW':'\u2013');
-    var load=ex.kind==='bar'&&s.kg>0?loading(S.meta,s.kg):null;
-    return '<li class="tile"><div class="tile-top"><div class="spread"><strong>'+esc(ex.name)+'</strong><span class="idx">('+String(i+1).padStart(2,'0')+')</span></div>'+(s.why?'<span class="why '+s.tone+'">'+esc(s.why)+'</span>':'')+'</div>'+
-      '<div class="tile-bot"><dl class="meta"><div><dt>Target</dt><dd>'+reps+'</dd></div>'+
-      (s.last?'<div><dt>Last</dt><dd>'+esc(setsText(s.last.sets))+'</dd></div>':'')+
-      (load?'<div><dt>Each side</dt><dd>'+(load.plates.length?esc(load.plates.map(fmt).join(' + ')):'No plates')+'</dd></div>':(ex.kind==='bar'&&s.kg>0?'<div><dt>Load</dt><dd>'+esc(loadText(S.meta,s.kg))+'</dd></div>':''))+
-      '</dl><div class="mark">'+mark+'</div></div></li>';
-  }).join('')+'</ul>';
+    var kg=s.kg>0?fmt(s.kg)+'<small>kg</small>':(ex.kind==='bw'?'BW':'\u2013');
+    return '<li><button class="plan-row" type="button" data-act="guide" data-ex="'+esc(ex.id)+'"><span class="idx">('+String(i+1).padStart(2,'0')+')</span>'+
+      '<span class="pname">'+esc(ex.name)+(s.tone==='up'?' <span class="flag" title="Weight goes up">+</span>':s.tone==='warn'?' <span class="flag" title="Needs a look">!</span>':'')+'</span>'+
+      '<span class="preps">'+reps+'</span><span class="pkg">'+kg+'</span></button></li>';
+  }).join('')+'</ol></section>';
+}
+function findEx(id){var all=S.meta.program.back.concat(S.meta.program.chest);for(var i=0;i<all.length;i++)if(all[i].id===id)return all[i];return null}
+function openGuide(id,fallbackName){
+  var ex=findEx(id)||{id:id,name:fallbackName||'Exercise',kind:'db',sets:0,min:0,max:0,kg:0,step:0}, g=guideFor(ex), known=!!findEx(id), s=known?suggest(S,ex):null;
+  var line=function(label,val){return val?'<div><dt>'+label+'</dt><dd>'+val+'</dd></div>':''};
+  $('#sheet-body').innerHTML='<div><div class="eyebrow">Muscles and guide</div><h3>'+esc(ex.name)+'</h3></div><dl class="facts">'+
+    line('Main muscles',esc(g.main)||'<span class="muted">Not set. Add them in Setup.</span>')+line('Also works',esc(g.also))+
+    (s?line('Target',esc(targetText(ex,s.kg)))+(ex.kind==='bar'&&s.kg>0?line('On the bar',esc(loadText(S.meta,s.kg))):'')+(s.last?line('Last time',esc(niceDate(s.last.date))+': '+esc(setsText(s.last.sets))):'')+line('Next step',esc(s.why)):'')+
+    '</dl><div class="row"><a class="btn primary wide" href="'+esc(g.video)+'" target="_blank" rel="noopener">'+(g.own?'Watch your saved video':'Find a form guide on YouTube')+'</a></div>'+
+    '<div class="row"><button class="btn wide" type="button" data-act="close-sheet">Close</button></div>';
+  var d=$('#sheet');if(d.showModal){if(!d.open)d.showModal()}else d.setAttribute('open','');
+}
+function closeSheet(){var d=$('#sheet');if(d.close)d.close();else d.removeAttribute('open')}
+function overview(){
+  var d=S.meta.draft;
+  return d.entries.map(function(e,ei){var done=e.sets.filter(function(s){return s.done}).length;
+    return '<li><button class="plan-row'+(done>=e.sets.length?' all':'')+'" type="button" data-act="jump" data-e="'+ei+'"><span class="idx">('+String(ei+1).padStart(2,'0')+')</span><span class="pname">'+esc(e.name)+'</span><span class="preps">'+(done>=e.sets.length?'Done':'')+'</span><span class="pkg small-n">'+done+'/'+e.sets.length+'</span></button></li>';
+  }).join('');
 }
 function viewToday(){
   if(S.meta.draft) return viewDraft();
@@ -417,14 +474,16 @@ function draftLoad(e){var s=e.sets.filter(function(x){return !x.done})[0]||e.set
 function viewDraft(){
   var d=S.meta.draft;
   var out='<section class="card hero"><div><div class="eyebrow">In progress</div><h2>'+esc(DAYS[d.type])+'</h2></div>'+
-    '<label class="field" for="d-date">Date<input id="d-date" type="date" data-f="date" value="'+esc(d.date)+'"></label></section>';
+    '<label class="field" for="d-date">Date<input id="d-date" type="date" data-f="date" value="'+esc(d.date)+'"></label></section>'+
+    '<section class="card"><div class="eyebrow">This session. Tap a lift to jump to it.</div><ol class="plan" id="overview">'+overview()+'</ol></section>';
   d.entries.forEach(function(e,ei){
-    out+='<section class="card"><div class="spread"><h3>'+esc(e.name)+'</h3><span class="muted small">Target '+esc(e.target)+'</span></div>'+
+    out+='<section class="card" id="lift-'+ei+'"><div class="spread"><h3>'+esc(e.name)+'</h3><span class="muted small">Target '+esc(e.target)+'</span></div>'+
       (e.last?'<div class="load">Last time: '+esc(e.last)+'</div>':'')+
       (e.why?'<div class="why '+e.tone+'">'+esc(e.why)+'</div>':'')+
       '<div class="load" id="load-'+ei+'">'+esc(draftLoad(e))+'</div>'+
       '<div class="sets">'+e.sets.map(function(s,si){return setRow(ei,si,s)}).join('')+'</div>'+
       '<div class="row"><button class="btn quiet" type="button" data-act="add-set" data-e="'+ei+'">+ Add set</button>'+
+      '<button class="btn quiet" type="button" data-act="guide" data-ex="'+esc(e.exId)+'" data-name="'+esc(e.name)+'">Muscles and guide</button>'+
       (e.sets.length>1?'<button class="btn quiet" type="button" data-act="del-set" data-e="'+ei+'">− Remove last set</button>':'')+'</div></section>';
   });
   out+='<section class="card"><div class="grid"><label class="field" for="d-rpe">Effort (RPE 1–10)<input id="d-rpe" inputmode="decimal" data-f="rpe" value="'+esc(d.rpe||'')+'"></label>'+
@@ -497,6 +556,7 @@ function exEditor(day,ex,i,len){
     f('name','Name',ex.name,'','span3')+
     '<label class="field" for="'+p+'kind">Type<select id="'+p+'kind" data-day="'+day+'" data-i="'+i+'" data-p="kind">'+Object.keys(KINDS).map(function(k){return '<option value="'+k+'"'+(ex.kind===k?' selected':'')+'>'+KINDS[k]+'</option>'}).join('')+'</select></label>'+
     f('sets','Sets',ex.sets,'numeric')+f('kg','Start kg',ex.kg||'','decimal')+f('min','Reps from',ex.min,'numeric')+f('max','Reps to',ex.max,'numeric')+f('step','Add kg',ex.step,'decimal')+f('goal','Goal kg',ex.goal||'','decimal')+
+    f('main','Main muscles',guideFor(ex).main,'','span3')+f('also','Also works',guideFor(ex).also,'','span3')+f('video','Video link (optional, starts https://)',ex.video||'','url','span3')+
     '</div><p class="small muted">Start kg is used until you log this lift. After that the app works from your last session.</p><div class="row">'+
     (i>0?'<button class="btn quiet" type="button" data-act="ex-up" data-day="'+day+'" data-i="'+i+'">Move up</button>':'')+
     (i<len-1?'<button class="btn quiet" type="button" data-act="ex-down" data-day="'+day+'" data-i="'+i+'">Move down</button>':'')+
@@ -565,11 +625,15 @@ document.addEventListener('click',function(ev){
   var a=b.dataset.act,d=S.meta.draft,day=b.dataset.day,i=+b.dataset.i;
   if(a!=='discard'&&a!=='del-session'&&a!=='ex-del'&&a!=='restore') armed=null;
   if(a==='start'){startSession(day)}
+  else if(a==='guide'){openGuide(b.dataset.ex,b.dataset.name)}
+  else if(a==='close-sheet'){closeSheet()}
+  else if(a==='jump'){var el=$('#lift-'+b.dataset.e);if(el)el.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}
   else if(a==='tick'){
     var row=b.closest('.set'),s=d.entries[+row.dataset.e].sets[+row.dataset.s];
     if(!s.done&&!(s.reps>0)){$('#reps-'+row.dataset.e+'-'+row.dataset.s).focus();return}
     s.done=!s.done;b.setAttribute('aria-pressed',s.done?'true':'false');row.classList.toggle('done',s.done);
     if(s.done)startRest();
+    $('#overview').innerHTML=overview();
     $('#load-'+row.dataset.e).textContent=draftLoad(d.entries[+row.dataset.e]);touch();
   }
   else if(a==='add-set'){var e=d.entries[+b.dataset.e],l=e.sets[e.sets.length-1];e.sets.push({kg:l?l.kg:0,reps:l?l.reps:0,done:false});touch();render()}
@@ -630,6 +694,7 @@ document.addEventListener('change',function(ev){
   if(t.dataset.p){
     var ex=S.meta.program[t.dataset.day][+t.dataset.i],p=t.dataset.p;
     if(p==='name')ex.name=t.value.trim()||ex.name;else if(p==='kind')ex.kind=t.value;
+    else if(p==='main'||p==='also'||p==='video')ex[p]=t.value.trim();
     else if(p==='sets')ex.sets=Math.max(1,Math.min(10,Math.round(num(t.value))||1));
     else if(p==='min'||p==='max'){ex[p]=Math.max(1,Math.round(num(t.value))||1);if(ex.min>ex.max){if(p==='min')ex.max=ex.min;else ex.min=ex.max}}
     else ex[p]=num(t.value);
@@ -641,7 +706,8 @@ document.addEventListener('change',function(ev){
   if(t.dataset.k==='plate'){S.meta.plates[+t.dataset.i].n=Math.max(0,Math.round(num(t.value)));plateTarget=null;touch()}
 });
 $('#rest').addEventListener('click',stopRest);
-window.addEventListener('hashchange',function(){armed=null;sheetMsg='';render();window.scrollTo(0,0)});
+$('#sheet').addEventListener('click',function(ev){if(ev.target===this)closeSheet()});
+window.addEventListener('hashchange',function(){closeSheet();armed=null;sheetMsg='';render();window.scrollTo(0,0)});
 setSync('loading');render();initCloud();
 </script>
 </body>
