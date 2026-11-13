@@ -139,6 +139,10 @@ strong{font-weight:600;color:var(--bright)}
 .out{display:none}
 .out.show{display:block}
 [hidden]{display:none!important}
+.hero-actions{display:flex;flex-direction:column;gap:10px}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);background:rgba(11,9,10,.55)}
+.seg button{border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:0 6px;min-height:46px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
 .side,.flow{display:contents}
 .banner{order:-1}
 /* Desktop: two columns. The lead card and summary stay put on the left; the working list scrolls on the right. */
@@ -365,7 +369,7 @@ function kgToLb(kg){return Math.round(kg*LB_PER_KG*10)/10}
 function lbToKg(lb){return lb/LB_PER_KG}
 /*PURE-END*/
 
-var LS='weights-log-v1', S=load(), summary=null, sheetMsg='', convKg=null, plateTarget=null, armed=null, restStart=0, restTimer=null, syncState='loading', cloud=null;
+var LS='weights-log-v1', S=load(), summary=null, sheetMsg='', convKg=null, pickDay=null, plateTarget=null, armed=null, restStart=0, restTimer=null, syncState='loading', cloud=null;
 var $=function(s){return document.querySelector(s)};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function num(v){var n=parseFloat(String(v).replace(',','.'));return isFinite(n)&&n>0?n:0}
@@ -450,12 +454,12 @@ function render(){
 }
 function planList(day){
   var list=S.meta.program[day];
-  return '<section class="card"><div class="eyebrow">Planned: '+list.length+' lift'+(list.length===1?'':'s')+'. Tap one for muscles, plates and a video.</div><ol class="plan">'+list.map(function(ex,i){
-    var s=suggest(S,ex), reps=ex.sets+' \u00d7 '+(ex.min===ex.max?ex.max:ex.min+'\u2013'+ex.max);
-    var kg=s.kg>0?fmt(s.kg)+'<small>kg</small>':(ex.kind==='bw'?'BW':'\u2013');
+  return '<section class="card"><div class="eyebrow">'+esc(DAYS[day])+': '+list.length+' lift'+(list.length===1?'':'s')+'. Weights are what you last did. Tap a lift for muscles, plates and a video.</div><ol class="plan">'+list.map(function(ex,i){
+    var s=suggest(S,ex), done=s.last?workSets(s.last).top:0, shown=s.last?done:s.kg;
+    var kg=shown>0?fmt(shown)+'<small>kg</small>':(ex.kind==='bw'?'BW':'\u2013');
+    var mid=!s.last?(s.kg>0?'Start':''):(s.kg!==done&&s.kg>0?'Next '+fmt(s.kg):'');
     return '<li><button class="plan-row" type="button" data-act="guide" data-ex="'+esc(ex.id)+'"><span class="idx">('+String(i+1).padStart(2,'0')+')</span>'+
-      '<span class="pname">'+esc(ex.name)+(s.tone==='up'?' <span class="flag" title="Weight goes up">+</span>':s.tone==='warn'?' <span class="flag" title="Needs a look">!</span>':'')+'</span>'+
-      '<span class="preps">'+reps+'</span><span class="pkg">'+kg+'</span></button></li>';
+      '<span class="pname">'+esc(ex.name)+'</span><span class="preps">'+mid+'</span><span class="pkg">'+kg+'</span></button></li>';
   }).join('')+'</ol></section>';
 }
 function findEx(id){var all=S.meta.program.back.concat(S.meta.program.chest);for(var i=0;i<all.length;i++)if(all[i].id===id)return all[i];return null}
@@ -478,7 +482,7 @@ function overview(){
 }
 function viewToday(){
   if(S.meta.draft) return viewDraft();
-  var day=nextDay(S), other=day==='back'?'chest':'back', out='';
+  var next=nextDay(S), day=pickDay||next, out='';
   if(summary){
     out+='<section class="banner"><strong>Saved: '+esc(DAYS[summary.type])+', '+esc(niceDate(summary.date))+'</strong>'+
       (summary.pbs.length?'<div class="row">'+summary.pbs.map(function(p){return '<span class="pb">Best yet: '+esc(p)+'</span>'}).join('')+'</div>':'')+
@@ -487,9 +491,9 @@ function viewToday(){
       '<button class="btn" type="button" data-act="copy-rows" data-id="'+esc(summary.id)+'">Copy rows for Gym log sheet</button></div>'+
       '<textarea class="plain out" id="out-rows" readonly aria-label="Rows for the Gym log sheet"></textarea><p class="small muted" id="msg-rows"></p></section>';
   }
-  var hero='<section class="card hero"><div><div class="eyebrow">Next session</div><h2>'+esc(DAYS[day])+'</h2></div>'+
-    '<div><div class="row"><button class="btn primary wide" type="button" data-act="start" data-day="'+day+'">Start session</button></div>'+
-    '<div class="row"><button class="btn quiet" type="button" data-act="start" data-day="'+other+'">Do '+esc(DAYS[other])+' instead</button></div></div></section>';
+  var hero='<section class="card hero"><div><div class="eyebrow">'+(day===next?'Next in turn':'Your pick')+'</div><h2>'+esc(DAYS[day])+'</h2></div>'+
+    '<div class="hero-actions"><div class="seg" role="group" aria-label="Choose a session">'+Object.keys(DAYS).map(function(k){return '<button type="button" data-act="pick" data-day="'+k+'" aria-pressed="'+(k===day?'true':'false')+'">'+esc(DAYS[k])+'</button>'}).join('')+'</div>'+
+    '<button class="btn primary" type="button" data-act="start" data-day="'+day+'">Start session</button></div></section>';
   return '<div class="side">'+hero+'</div><div class="flow">'+out+planList(day)+'</div>';
 }
 function setRow(ei,si,s){
@@ -656,7 +660,8 @@ document.addEventListener('click',function(ev){
   var b=ev.target.closest('[data-act]');if(!b)return;
   var a=b.dataset.act,d=S.meta.draft,day=b.dataset.day,i=+b.dataset.i;
   if(a!=='discard'&&a!=='del-session'&&a!=='ex-del'&&a!=='restore') armed=null;
-  if(a==='start'){startSession(day)}
+  if(a==='start'){pickDay=null;startSession(day)}
+  else if(a==='pick'){pickDay=day;summary=null;render()}
   else if(a==='guide'){openGuide(b.dataset.ex,b.dataset.name)}
   else if(a==='close-sheet'){closeSheet()}
   else if(a==='jump'){var el=$('#lift-'+b.dataset.e);if(el)el.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}
