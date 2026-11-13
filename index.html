@@ -434,7 +434,7 @@ function musclesIn(text){
   });
   return out;
 }
-/* Common home-gym lifts for the add-exercise lookup: name, kind, main muscles, also works. No upright rows or heavy overhead pressing. */
+/* Common home-gym lifts for the add-exercise lookup: name, kind, main muscles, also works, and 1 where the lift often aggravates shoulder impingement. */
 var LIBRARY=[
   ['Bench press','bar','chest','frontdelts,triceps'],['Paused bench press','bar','chest','frontdelts,triceps'],['Close-grip bench press','bar','triceps','chest,frontdelts'],
   ['Incline barbell press','bar','chest','frontdelts,triceps'],['Floor press','bar','chest,triceps','frontdelts'],['Deadlift','bar','glutes,hamstrings,lowerback','quads,lats,traps,forearms'],
@@ -450,6 +450,9 @@ var LIBRARY=[
   ['Dumbbell skull crusher','db','triceps','forearms'],['Overhead triceps extension','db','triceps','forearms'],['Triceps kickback','db','triceps','reardelts'],
   ['Dumbbell Romanian deadlift','db','hamstrings,glutes','lowerback,forearms'],['Goblet squat','db','quads,glutes','abs'],['Bulgarian split squat','db','quads,glutes','hamstrings'],
   ['Dumbbell lunge','db','quads,glutes','hamstrings,calves'],['Suitcase carry','db','forearms,abs','traps'],["Farmer's carry",'db','forearms,traps','abs'],
+  ['Overhead press','bar','frontdelts','sidedelts,triceps,traps,abs',1],['Upright row','bar','sidedelts,traps','frontdelts,biceps',1],
+  ['Seated dumbbell shoulder press','db','frontdelts','sidedelts,triceps',1],['Arnold press','db','frontdelts,sidedelts','triceps',1],
+  ['Dumbbell upright row','db','sidedelts,traps','frontdelts,biceps',1],['Lateral raise','db','sidedelts','traps',1],
   ['Pull-up','bw','lats','biceps,forearms,reardelts'],['Pull-up negatives','bw','lats','biceps,forearms,traps,reardelts'],['Chin-up','bw','lats,biceps','forearms'],
   ['Push-up','bw','chest','frontdelts,triceps,abs'],['Inverted row','bw','lats,rhomboids','biceps,reardelts'],['Plank','bw','abs','frontdelts']
 ];
@@ -648,6 +651,7 @@ function renderAdd(){
     '<div class="grid"><label class="field" for="af-kg">'+(f.kind==='bw'?'Added kg (optional)':'Weight kg')+'<input id="af-kg" inputmode="decimal" autocomplete="off" value="'+esc(f.kg)+'"></label>'+
     '<label class="field" for="af-sets">Sets<input id="af-sets" inputmode="numeric" value="'+f.sets+'"></label>'+
     '<label class="field" for="af-reps">Reps<input id="af-reps" autocomplete="off" value="'+(f.min===f.max?f.max:f.min+'-'+f.max)+'"></label></div>'+
+    (libFind(f.name)&&libFind(f.name)[4]?'<p class="note">Shoulder heads-up: this one often aggravates impingement. Go light, and stop if it pinches.</p>':'')+
     (f.kind!=='bw'&&num(f.kg)>0?'<p class="load" id="af-load">'+esc(f.kind==='bar'?loadText(S.meta,num(f.kg)):loadText(S.meta,num(f.kg),'db1'))+'</p>':'<p class="load" id="af-load"></p>')+
     '<div id="af-fig">'+addPreview()+'</div>'+
     '<div class="chips" id="af-chips">'+Object.keys(MUSCLES).map(function(k){return '<button class="chip'+cnt(k)+'" type="button" data-act="af-m" data-m="'+k+'">'+MUSCLES[k][0]+(f.m[k]===1?' \u00b7 main':f.m[k]===2?' \u00b7 also':'')+'</button>'}).join('')+'</div>'+
