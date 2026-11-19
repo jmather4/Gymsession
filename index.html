@@ -339,6 +339,24 @@ function liftHistory(S,ex){
   });
   return out.sort(function(a,b){return a.date<b.date?1:a.date>b.date?-1:b.at-a.at});
 }
+/* A day's programme rebuilt from one finished session: same lifts, order, set counts and rep range. Lifts already in the
+   programme keep their id (so history and progression carry on), name, start kg, step and goal; lifts no longer in the programme
+   keep the session's id, so their history still counts, and start at the session's top weight. */
+function programFromSession(S,session){
+  var all=S.meta.program.back.concat(S.meta.program.chest);
+  var byId=function(id){for(var i=0;i<all.length;i++)if(all[i].id===id)return all[i];return null};
+  return session.entries.filter(function(e){return e.sets.length}).map(function(e){
+    var reps=e.sets.map(function(s){return s.reps}),top=Math.max.apply(null,e.sets.map(function(s){return s.kg}));
+    var old=e.exId?byId(e.exId):null,ex;
+    if(old){ex=JSON.parse(JSON.stringify(old))}
+    else{
+      var lib=libFind(e.name),kind=e.kind||(lib?lib[1]:(top>0?'db':'bw'));
+      ex={id:e.exId||('x'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)),name:e.name,kind:kind,kg:top>0?top:0,step:kind==='bar'?2:kind==='db'?1:0,goal:0};
+    }
+    ex.sets=e.sets.length;ex.min=Math.min.apply(null,reps);ex.max=Math.max.apply(null,reps);
+    return ex;
+  });
+}
 function workSets(h){var top=Math.max.apply(null,h.sets.map(function(s){return s.kg}));return {top:top,sets:h.sets.filter(function(s){return s.kg===top})}}
 /* Next target for a lift: add weight once every set hits the top of the rep range; hold after misses; drop about 10% on a third miss. */
 function suggest(S,ex){
@@ -855,7 +873,8 @@ function viewHistory(){
       s.entries.map(function(e){return '<div><strong>'+esc(e.name)+'</strong><br><span class="muted">'+esc(setsText(e.sets))+'</span></div>'}).join('')+
       (s.rpe?'<div class="muted">Effort: RPE '+esc(s.rpe)+'</div>':'')+(s.notes?'<div class="muted">'+esc(s.notes)+'</div>':'')+
       '<div class="muted small">'+(s.sent?'In your sheet':'Not in your sheet yet')+'</div>'+
-      '<div class="row">'+(!s.sent&&sheetCfg().url?'<button class="btn quiet" type="button" data-act="send" data-id="'+esc(s.id)+'">Send to sheet</button>':'')+'<button class="btn quiet danger" type="button" data-act="del-session" data-id="'+esc(s.id)+'">'+(armed==='del-'+s.id?'Tap again to delete for good':'Delete session')+'</button></div></div></details>';
+      '<div class="row">'+(!s.sent&&sheetCfg().url?'<button class="btn quiet" type="button" data-act="send" data-id="'+esc(s.id)+'">Send to sheet</button>':'')+(DAYS[s.type]?'<button class="btn quiet" type="button" data-act="make-standard" data-id="'+esc(s.id)+'">'+(armed==='std-'+s.id?'Tap again to replace your '+esc(DAYS[s.type])+' programme':'Make this my standard '+esc(DAYS[s.type]))+'</button>':'')+
+      '<button class="btn quiet danger" type="button" data-act="del-session" data-id="'+esc(s.id)+'">'+(armed==='del-'+s.id?'Tap again to delete for good':'Delete session')+'</button></div></div></details>';
   }).join('');
   return '<div class="side">'+(goals?'<section class="card"><div><div class="eyebrow">Goals</div><h2>Heaviest logged set</h2></div>'+goals+'</section>':'')+'</div><div class="flow">'+
     '<section class="card"><div><div class="eyebrow">Log</div><h2>'+list.length+' session'+(list.length===1?'':'s')+'</h2></div>'+
@@ -937,7 +956,7 @@ function arm(key){if(armed===key){armed=null;return true}armed=key;render();retu
 document.addEventListener('click',function(ev){
   var b=ev.target.closest('[data-act]');if(!b)return;
   var a=b.dataset.act,d=S.meta.draft,day=b.dataset.day,i=+b.dataset.i;
-  if(a!=='discard'&&a!=='del-session'&&a!=='ex-del'&&a!=='restore') armed=null;
+  if(a!=='discard'&&a!=='del-session'&&a!=='ex-del'&&a!=='restore'&&a!=='make-standard') armed=null;
   if(a==='start'){pickDay=null;startSession(day)}
   else if(a==='pick'){pickDay=day;summary=null;render()}
   else if(a==='guide'){openGuide(b.dataset.ex,b.dataset.name)}
@@ -970,6 +989,12 @@ document.addEventListener('click',function(ev){
       plateTarget=null;summary=null;touch();
       new Set(oldKeys.concat(S.sessions.map(function(s){return monthKey(s.date)}))).forEach(pushMonth);render();
     }else{$('#restore').value=JSON.stringify(o)}
+  }
+  else if(a==='make-standard'){
+    var ss=S.sessions.filter(function(s){return s.id===b.dataset.id})[0];
+    if(!ss||!DAYS[ss.type])return;
+    if(arm('std-'+ss.id)){S.meta.program[ss.type]=programFromSession(S,ss);sheetMsg=DAYS[ss.type]+' programme now matches your '+niceDate(ss.date)+' session.';touch();render()}
+    else{var op=document.querySelectorAll('details');op.forEach(function(el){if(el.querySelector('[data-act="make-standard"][data-id="'+b.dataset.id+'"]'))el.open=true})}
   }
   else if(a==='del-session'){
     if(arm('del-'+b.dataset.id)){var gs=S.sessions.filter(function(s){return s.id===b.dataset.id})[0];S.sessions=S.sessions.filter(function(s){return s.id!==b.dataset.id});S.meta.deleted.push(b.dataset.id);if(summary&&summary.id===b.dataset.id)summary=null;touch();if(gs)pushMonth(monthKey(gs.date));render()}
