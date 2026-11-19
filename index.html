@@ -359,6 +359,39 @@ function programFromSession(S,session){
     return ex;
   });
 }
+/* Sessions rebuilt from the sheet's rows (Date, Session, Exercise, Set, Weight, Reps, RPE, Notes, Session ID), grouped by
+   session id. Lifts are matched to the programme by name within that day, so progression picks them up; anything else gets
+   a stable id from its name. */
+function sessionsFromRows(S,rows){
+  var dayOf=function(n){for(var k in DAYS)if(DAYS[k]===n)return k;return null};
+  var slug=function(n){return 'x-'+String(n).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')};
+  var byId={},order=[];
+  rows.forEach(function(r){
+    if(!r||r.length<9)return;
+    var id=String(r[8]||'').trim(),day=dayOf(String(r[1]||'').trim()),date=String(r[0]||'').slice(0,10),name=String(r[2]||'').trim();
+    if(!id||!day||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!name)return;
+    var s=byId[id];
+    if(!s){s=byId[id]={id:id,type:day,date:date,rpe:'',notes:'',entries:[],updatedAt:0};order.push(id)}
+    if(r[6]!==''&&r[6]!=null&&!s.rpe)s.rpe=String(r[6]);
+    if(r[7]&&!s.notes)s.notes=String(r[7]);
+    var e=s.entries.filter(function(x){return x.name===name})[0];
+    if(!e){
+      var low=name.toLowerCase(),ex=S.meta.program[day].filter(function(x){return String(x.name).trim().toLowerCase()===low})[0];
+      var lib=libFind(name),kg0=parseFloat(r[4])||0;
+      e={exId:ex?ex.id:slug(name),name:name,kind:ex?ex.kind:(lib?lib[1]:(kg0>0?'db':'bw')),sets:[],_n:[]};s.entries.push(e);
+    }
+    var reps=Math.round(parseFloat(r[5])||0);
+    if(reps>0){e.sets.push({kg:r2(parseFloat(r[4])||0),reps:reps});e._n.push(parseFloat(r[3])||e._n.length+1)}
+  });
+  return order.map(function(id){
+    var s=byId[id];
+    s.entries=s.entries.filter(function(e){return e.sets.length}).map(function(e){
+      var ix=e.sets.map(function(_,i){return i}).sort(function(a,b){return e._n[a]-e._n[b]});
+      return {exId:e.exId,name:e.name,kind:e.kind,sets:ix.map(function(i){return e.sets[i]})};
+    });
+    return s;
+  }).filter(function(s){return s.entries.length});
+}
 function workSets(h){var top=Math.max.apply(null,h.sets.map(function(s){return s.kg}));return {top:top,sets:h.sets.filter(function(s){return s.kg===top})}}
 /* Next target for a lift: add weight once every set hits the top of the rep range; hold after misses; drop about 10% on a third miss. */
 function suggest(S,ex){
@@ -583,6 +616,23 @@ async function sendToSheet(sessions){
   }catch(e){return {ok:false,error:'Couldn\'t reach the sheet. Check your signal and the address in Setup, then send again.'}}
 }
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
+/* Pull every session back from the sheet and add the ones this device doesn't have (or has deleted). Nothing here is overwritten. */
+async function loadFromSheet(){
+  var c=sheetCfg();
+  if(!c.url) return {ok:false,error:'No sheet address saved yet. Add it above first.'};
+  try{
+    var res=await fetch(c.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({key:c.key,action:'read'})});
+    var out=await res.json();
+    if(!out||!out.ok) return {ok:false,error:'The sheet turned the request down'+(out&&out.error?': '+out.error:'')+'. Check the key above.'};
+    if(!Array.isArray(out.rows)) return {ok:false,error:'Your sheet\'s Apps Script is the old version, which can only add rows. Update it from the repo and deploy a new version, then try again.'};
+    var have={},now=Date.now(),keys={};
+    S.sessions.forEach(function(s){have[s.id]=1});(S.meta.deleted||[]).forEach(function(id){have[id]=1});
+    var fresh=sessionsFromRows(S,out.rows).filter(function(s){return !have[s.id]});
+    fresh.forEach(function(s){s.sent=now;s.updatedAt=now;S.sessions.push(s);keys[monthKey(s.date)]=1});
+    if(fresh.length){touch();Object.keys(keys).forEach(pushMonth)}
+    return {ok:true,added:fresh.length};
+  }catch(e){return {ok:false,error:'Couldn\'t reach the sheet. Check your signal and the address above, then try again.'}}
+}
 
 /* ---- saving: this device always; your Claude account as well when the page is opened in Claude ---- */
 var queue={}, metaTimer=null;
@@ -927,7 +977,9 @@ function viewSetup(){
     '<label class="field" for="k-url">Apps Script web app address<input id="k-url" data-k="sheet-url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/\u2026/exec" value="'+esc(c.url)+'"></label>'+
     '<label class="field" for="k-key">Key (the phrase you put in the script)<input id="k-key" data-k="sheet-key" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(c.key)+'"></label>'+
     '<p class="small muted">With both filled in, every finished session is added to the sheet. This works from the GitHub Pages address, not from inside Claude.</p>'+
-    '<div class="row"><button class="btn" type="button" data-act="send-unsent">Send '+un+' unsent session'+(un===1?'':'s')+'</button></div>'+
+    '<div class="row"><button class="btn" type="button" data-act="send-unsent">Send '+un+' unsent session'+(un===1?'':'s')+'</button>'+
+    '<button class="btn" type="button" data-act="load-sheet">Load history from sheet</button></div>'+
+    '<p class="small muted">Load history brings back sessions logged on another device. Sessions already here are left as they are.</p>'+
     (sheetMsg?'<p class="note">'+esc(sheetMsg)+'</p>':'')+'</section>';
   out+='<section class="card"><div><div class="eyebrow">Your data</div><h2>Backup and export</h2></div>'+
     '<div class="row"><button class="btn" type="button" data-act="copy-all">Copy all rows for Gym log sheet</button><button class="btn" type="button" data-act="copy-backup">Copy full backup</button></div>'+
@@ -1015,6 +1067,10 @@ document.addEventListener('click',function(ev){
   else if(a==='del-session'){
     if(arm('del-'+b.dataset.id)){var gs=S.sessions.filter(function(s){return s.id===b.dataset.id})[0];S.sessions=S.sessions.filter(function(s){return s.id!==b.dataset.id});S.meta.deleted.push(b.dataset.id);if(summary&&summary.id===b.dataset.id)summary=null;touch();if(gs)pushMonth(monthKey(gs.date));render()}
     else{var open=document.querySelectorAll('details');open.forEach(function(el){if(el.querySelector('[data-id="'+b.dataset.id+'"]'))el.open=true})}
+  }
+  else if(a==='load-sheet'){
+    b.disabled=true;b.textContent='Loading\u2026';
+    loadFromSheet().then(function(r){sheetMsg=r.ok?(r.added?'Loaded '+r.added+' session'+(r.added===1?'':'s')+' from your sheet.':'Nothing new: this device already has every session in the sheet.'):r.error;render()});
   }
   else if(a==='send'||a==='send-unsent'){
     var list=a==='send'?S.sessions.filter(function(s){return s.id===b.dataset.id}):unsent();
