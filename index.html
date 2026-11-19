@@ -353,7 +353,9 @@ function programFromSession(S,session){
       var lib=libFind(e.name),kind=e.kind||(lib?lib[1]:(top>0?'db':'bw'));
       ex={id:e.exId||('x'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)),name:e.name,kind:kind,kg:top>0?top:0,step:kind==='bar'?2:kind==='db'?1:0,goal:0};
     }
-    ex.sets=e.sets.length;ex.min=Math.min.apply(null,reps);ex.max=Math.max.apply(null,reps);
+    var wu=0;if(ex.kind!=='bw')while(wu<e.sets.length-1&&e.sets[wu].kg<top)wu++;
+    var work=e.sets.slice(wu).map(function(s){return s.reps});
+    ex.sets=e.sets.length;ex.warmup=wu;ex.min=Math.min.apply(null,work);ex.max=Math.max.apply(null,work);
     return ex;
   });
 }
@@ -361,10 +363,10 @@ function workSets(h){var top=Math.max.apply(null,h.sets.map(function(s){return s
 /* Next target for a lift: add weight once every set hits the top of the rep range; hold after misses; drop about 10% on a third miss. */
 function suggest(S,ex){
   var h=liftHistory(S,ex), base=function(kg,reps,why,tone){return {kg:kg,reps:reps,why:why,tone:tone||'',last:h[0]||null}};
-  var fill=function(n){var a=[];for(var i=0;i<ex.sets;i++)a.push(n);return a};
+  var nw=workCount(ex), fill=function(n){var a=[];for(var i=0;i<nw;i++)a.push(n);return a};
   if(!h.length) return base(ex.kg,fill(ex.max),ex.kind==='bw'?'':(ex.kg>0?'Starting weight. Change it if it\'s wrong.':'No weight yet. Enter what you use.'),ex.kind!=='bw'&&!(ex.kg>0)?'warn':'');
   var w=workSets(h[0]), top=w.top;
-  var hitAll=w.sets.length>=ex.sets&&w.sets.every(function(s){return s.reps>=ex.max});
+  var hitAll=w.sets.length>=nw&&w.sets.every(function(s){return s.reps>=ex.max});
   if(hitAll&&ex.step>0){
     var want=r2(top+ex.step);
     if(ex.kind==='bar'){
@@ -381,14 +383,28 @@ function suggest(S,ex){
     if(ex.kind==='bar'){var nd=nearest(S.meta,drop);drop=nd.below!==null?nd.below:top}else drop=Math.round(drop);
     return base(drop,fill(ex.min),'Missed reps three sessions running at '+fmt(top)+' kg. Drop about 10% this week.','warn');
   }
-  var reps=[];for(var j=0;j<ex.sets;j++){var prev=w.sets[j]?w.sets[j].reps:ex.min-1;reps.push(Math.max(ex.min,Math.min(ex.max,prev+1)))}
+  var reps=[];for(var j=0;j<nw;j++){var prev=w.sets[j]?w.sets[j].reps:ex.min-1;reps.push(Math.max(ex.min,Math.min(ex.max,prev+1)))}
   if(misses===2) return base(top,reps,'Missed reps twice at this weight. Hold it and hit the reps.','warn');
   return base(top,reps,hitAll?'Same as last time.':'Same weight. Add reps until every set hits '+ex.max+'.');
 }
+/* Warm-up sets come first and don't count towards the target: progression looks only at the working sets. */
+function warmCount(ex){return ex.kind==='bw'?0:Math.max(0,Math.min(Math.round(ex.warmup||0),(ex.sets||1)-1))}
+function workCount(ex){return Math.max(1,(ex.sets||1)-warmCount(ex))}
+/* Warm-up weights ramp from about 60% to 85% of the working weight, rounded down to something loadable. */
+function warmupSets(meta,ex,kg){
+  var c=warmCount(ex),out=[];
+  if(!(kg>0)) return out;
+  for(var i=0;i<c;i++){
+    var pct=c===1?0.8:0.6+0.25*i/(c-1),w=kg*pct;
+    if(ex.kind==='bar'){var n=nearest(meta,w);w=n.below!==null?n.below:meta.bar}else w=Math.floor(w*2)/2;
+    out.push({kg:w,reps:ex.max,done:false,warm:true});
+  }
+  return out;
+}
 function targetText(ex,kg){
-  var reps=ex.min===ex.max?ex.max:ex.min+'–'+ex.max;
+  var reps=ex.min===ex.max?ex.max:ex.min+'–'+ex.max,wc=warmCount(ex);
   var w=ex.kind==='bw'?(kg>0?'bodyweight + '+fmt(kg)+' kg':'bodyweight'):(kg>0?fmt(kg)+' kg':'weight not set');
-  return ex.sets+' × '+reps+' @ '+w;
+  return workCount(ex)+' × '+reps+' @ '+w+(wc?' (+'+wc+' warm-up)':'');
 }
 function setsText(sets){
   var groups=[];
@@ -771,7 +787,7 @@ function viewToday(){
   return '<div class="side">'+hero+'</div><div class="flow">'+out+planList(day)+'</div>';
 }
 function setRow(ei,si,s){
-  return '<div class="set'+(s.done?' done':'')+'" data-e="'+ei+'" data-s="'+si+'"><span class="n">'+(si+1)+'</span>'+
+  return '<div class="set'+(s.done?' done':'')+'" data-e="'+ei+'" data-s="'+si+'"><span class="n"'+(s.warm?' title="Warm-up"':'')+'>'+(s.warm?'W':(si+1))+'</span>'+
     '<input id="kg-'+ei+'-'+si+'" inputmode="decimal" autocomplete="off" aria-label="Weight in kg, set '+(si+1)+'" data-f="kg" value="'+(s.kg>0?fmt(s.kg):'')+'" placeholder="kg">'+
     '<span class="muted">kg ×</span>'+
     '<input id="reps-'+ei+'-'+si+'" inputmode="numeric" autocomplete="off" aria-label="Reps, set '+(si+1)+'" data-f="reps" value="'+(s.reps>0?s.reps:'')+'" placeholder="reps">'+
@@ -885,7 +901,7 @@ function exEditor(day,ex,i,len){
   return '<details><summary><span>'+esc(ex.name)+'</span><span class="muted">'+esc(targetText(ex,ex.kg))+'</span></summary><div class="body"><div class="grid">'+
     f('name','Name',ex.name,'','span3')+
     '<label class="field" for="'+p+'kind">Type<select id="'+p+'kind" data-day="'+day+'" data-i="'+i+'" data-p="kind">'+Object.keys(KINDS).map(function(k){return '<option value="'+k+'"'+(ex.kind===k?' selected':'')+'>'+KINDS[k]+'</option>'}).join('')+'</select></label>'+
-    f('sets','Sets',ex.sets,'numeric')+f('kg','Start kg',ex.kg||'','decimal')+f('min','Reps from',ex.min,'numeric')+f('max','Reps to',ex.max,'numeric')+f('step','Add kg',ex.step,'decimal')+f('goal','Goal kg',ex.goal||'','decimal')+
+    f('sets','Sets',ex.sets,'numeric')+f('warmup','Warm-up sets (of these)',ex.warmup||0,'numeric')+f('kg','Start kg',ex.kg||'','decimal')+f('min','Reps from',ex.min,'numeric')+f('max','Reps to',ex.max,'numeric')+f('step','Add kg',ex.step,'decimal')+f('goal','Goal kg',ex.goal||'','decimal')+
     f('main','Main muscles',guideFor(ex).main,'','span3')+f('also','Also works',guideFor(ex).also,'','span3')+f('video','Video link (optional, starts https://)',ex.video||'','url','span3')+
     '</div><p class="small muted">Start kg is used until you log this lift. After that the app works from your last session.</p><div class="row">'+
     (i>0?'<button class="btn quiet" type="button" data-act="ex-up" data-day="'+day+'" data-i="'+i+'">Move up</button>':'')+
@@ -926,12 +942,12 @@ function startSession(day){
   S.meta.draft={id:uid(),type:day,date:todayStr(),rpe:'',notes:'',entries:S.meta.program[day].map(function(ex){
     var s=suggest(S,ex);
     return {exId:ex.id,name:ex.name,kind:ex.kind,target:targetText(ex,s.kg),why:s.why,tone:s.tone,last:s.last?setsText(s.last.sets):'',
-      sets:s.reps.map(function(r){return {kg:s.kg,reps:r,done:false}})};
+      sets:warmupSets(S.meta,ex,s.kg).concat(s.reps.map(function(r){return {kg:s.kg,reps:r,done:false}}))};
   })};
   summary=null;touch();render();window.scrollTo(0,0);
 }
 function finishSession(){
-  var d=S.meta.draft, entries=d.entries.map(function(e){return {exId:e.exId,name:e.name,kind:e.kind,sets:e.sets.filter(function(s){return s.done&&s.reps>0}).map(function(s){return {kg:s.kg,reps:s.reps}})}}).filter(function(e){return e.sets.length});
+  var d=S.meta.draft, entries=d.entries.map(function(e){return {exId:e.exId,name:e.name,kind:e.kind,sets:e.sets.filter(function(s){return s.done&&s.reps>0}).map(function(s){return s.warm?{kg:s.kg,reps:s.reps,warm:true}:{kg:s.kg,reps:s.reps}})}}).filter(function(e){return e.sets.length});
   if(!entries.length){var m=$('#d-msg');m.hidden=false;m.textContent='Tick at least one set before saving.';return}
   var date=/^\d{4}-\d{2}-\d{2}$/.test(d.date)?d.date:todayStr();
   var session={id:d.id,type:d.type,date:date,rpe:d.rpe||'',notes:d.notes||'',entries:entries,updatedAt:Date.now()};
@@ -1057,7 +1073,8 @@ document.addEventListener('change',function(ev){
     var ex=S.meta.program[t.dataset.day][+t.dataset.i],p=t.dataset.p;
     if(p==='name')ex.name=t.value.trim()||ex.name;else if(p==='kind')ex.kind=t.value;
     else if(p==='main'||p==='also'||p==='video')ex[p]=t.value.trim();
-    else if(p==='sets')ex.sets=Math.max(1,Math.min(10,Math.round(num(t.value))||1));
+    else if(p==='sets'){ex.sets=Math.max(1,Math.min(10,Math.round(num(t.value))||1));if((ex.warmup||0)>ex.sets-1)ex.warmup=ex.sets-1}
+    else if(p==='warmup')ex.warmup=Math.max(0,Math.min(ex.sets-1,Math.round(parseFloat(t.value)||0)));
     else if(p==='min'||p==='max'){ex[p]=Math.max(1,Math.round(num(t.value))||1);if(ex.min>ex.max){if(p==='min')ex.max=ex.min;else ex.min=ex.max}}
     else ex[p]=num(t.value);
     touch();var sum=t.closest('details').querySelector('summary');sum.firstChild.textContent=ex.name;sum.lastChild.textContent=targetText(ex,ex.kg);
